@@ -386,11 +386,11 @@ export default function App() {
     const partes = [];
     if (item.horario && item.horario.trim() !== '') partes.push(`🕒 ${item.horario.trim()}`);
     if ((item.series && item.series.trim() !== '') && (item.reps && item.reps.trim() !== '')) {
-        partes.push(`${item.series.trim()} séries x ${item.reps.trim()} reps`);
+        partes.push(`${item.series.trim()} x ${item.reps.trim()}`);
     } else if (item.series && item.series.trim() !== '') {
-        partes.push(`${item.series.trim()} séries`);
+        partes.push(`${item.series.trim()}`);
     } else if (item.reps && item.reps.trim() !== '') {
-        partes.push(`${item.reps.trim()} reps`);
+        partes.push(`${item.reps.trim()}`);
     }
     if (item.tempo && item.tempo.trim() !== '') partes.push(`${item.tempo.trim()}`);
     if (item.velocidade && item.velocidade.trim() !== '') partes.push(`${item.velocidade.trim()}`);
