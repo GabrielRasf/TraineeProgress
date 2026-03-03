@@ -46,6 +46,7 @@ export default function App() {
   const [tempoEx, setTempoEx] = useState('');
   const [velocidadeEx, setVelocidadeEx] = useState('');
   const [horarioEx, setHorarioEx] = useState('');
+  const [cargaEx, setCargaEx] = useState('');
   const [idExSendoEditado, setIdExSendoEditado] = useState(null);
   
   const [idCicloSendoEditado, setIdCicloSendoEditado] = useState(null);
@@ -299,7 +300,8 @@ export default function App() {
       reps: repsEx,
       tempo: tempoEx,
       velocidade: velocidadeEx,
-      horario: horarioEx
+      horario: horarioEx,
+      carga: cargaEx,
     };
     
     let novoTreinoSelecionado = {...treinoSelecionado};
@@ -378,12 +380,14 @@ export default function App() {
     setTempoEx(''); 
     setVelocidadeEx(''); 
     setHorarioEx(''); 
+    setCargaEx('');
     setIdExSendoEditado(null); 
     setModalExercicioVisible(false); 
   };
 
   const formatarDetalhesExercicio = (item) => {
     const partes = [];
+    if (item.carga && item.carga.trim() !== '') partes.push(`🏋️ ${item.carga.trim()}`);
     if (item.horario && item.horario.trim() !== '') partes.push(`🕒 ${item.horario.trim()}`);
     if ((item.series && item.series.trim() !== '') && (item.reps && item.reps.trim() !== '')) {
         partes.push(`${item.series.trim()} séries x ${item.reps.trim()} reps`);
@@ -592,6 +596,7 @@ export default function App() {
                   setTempoEx('');
                   setVelocidadeEx('');
                   setHorarioEx('');
+                  setCargaEx('');
                   setIdExSendoEditado(null);
                   setModalExercicioVisible(true);
                 }}>
@@ -633,6 +638,7 @@ export default function App() {
                       setTempoEx(item.tempo);
                       setVelocidadeEx(item.velocidade);
                       setHorarioEx(item.horario || '');
+                      setCargaEx(item.carga || '');
                       setModalExercicioVisible(true);
                     }}
                   />
@@ -737,6 +743,7 @@ export default function App() {
             showsVerticalScrollIndicator={false}>
             <View style={styles.modalView}>
               <Text style={styles.modalTitulo}>{idExSendoEditado ? "Editar" : "Novo"} Exercício</Text>
+              
               <TextInput 
                 style={styles.input} 
                 placeholder="Nome (ex: Supino)" 
@@ -744,6 +751,15 @@ export default function App() {
                 value={nomeEx} 
                 onChangeText={setNomeEx} 
               />
+              
+              <TextInput 
+                style={styles.input} 
+                placeholder="Carga (ex: 20kg)" 
+                placeholderTextColor={COLORS.textSecondary} 
+                value={cargaEx} 
+                onChangeText={setCargaEx} 
+              />
+              
               <TextInput 
                 style={styles.input} 
                 placeholder="Horário (ex: 19:00)" 
@@ -752,41 +768,39 @@ export default function App() {
                 onChangeText={setHorarioEx} 
               />
               
-              <View style={styles.rowInput}>
-                <TextInput 
-                  style={[styles.input, {flex: 1}]} 
-                  placeholder="Séries" 
-                  placeholderTextColor={COLORS.textSecondary} 
-                  value={seriesEx} 
-                  onChangeText={setSeriesEx} 
-                  keyboardType="numeric" 
-                />
-                <TextInput 
-                  style={[styles.input, {flex: 1}]} 
-                  placeholder="Reps" 
-                  placeholderTextColor={COLORS.textSecondary} 
-                  value={repsEx} 
-                  onChangeText={setRepsEx} 
-                  keyboardType="numeric" 
-                />
-              </View>
-
-              <View style={styles.rowInput}>
-                <TextInput 
-                  style={[styles.input, {flex: 1}]} 
-                  placeholder="Tempo (ex: 60s)" 
-                  placeholderTextColor={COLORS.textSecondary} 
-                  value={tempoEx} 
-                  onChangeText={setTempoEx} 
-                />
-                <TextInput 
-                  style={[styles.input, {flex: 1}]} 
-                  placeholder="Velocidade (ex: 2010)" 
-                  placeholderTextColor={COLORS.textSecondary} 
-                  value={velocidadeEx} 
-                  onChangeText={setVelocidadeEx} 
-                />
-              </View>
+              <TextInput 
+                style={styles.input} 
+                placeholder="Séries (ex: 3)" 
+                placeholderTextColor={COLORS.textSecondary} 
+                value={seriesEx} 
+                onChangeText={setSeriesEx} 
+                keyboardType="numeric" 
+              />
+              
+              <TextInput 
+                style={styles.input} 
+                placeholder="Repetições (ex: 12)" 
+                placeholderTextColor={COLORS.textSecondary} 
+                value={repsEx} 
+                onChangeText={setRepsEx} 
+                keyboardType="numeric" 
+              />
+              
+              <TextInput 
+                style={styles.input} 
+                placeholder="Tempo (ex: 60s)" 
+                placeholderTextColor={COLORS.textSecondary} 
+                value={tempoEx} 
+                onChangeText={setTempoEx} 
+              />
+              
+              <TextInput 
+                style={styles.input} 
+                placeholder="Velocidade (ex: 2010)" 
+                placeholderTextColor={COLORS.textSecondary} 
+                value={velocidadeEx} 
+                onChangeText={setVelocidadeEx} 
+              />
 
               <View style={styles.modalButtonsContainer}>
                 <TouchableOpacity style={styles.modalButtonSalvar} onPress={salvarExercicio}>
@@ -989,13 +1003,15 @@ const styles = StyleSheet.create({
     paddingVertical: 20,
   },
   modalView: { 
-    width: '90%', 
+    margin: 20,
     backgroundColor: COLORS.card, 
     borderRadius: 25, 
     padding: 25, 
-    alignSelf: 'center',
-    maxHeight: '80%',
-    marginVertical: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
   },
   modalTitulo: { fontSize: 20, fontWeight: 'bold', marginBottom: 20, textAlign: 'center', color: COLORS.text },
   input: { backgroundColor: COLORS.input, color: COLORS.text, borderRadius: 12, padding: 15, marginBottom: 12, fontSize: 16 },
