@@ -184,7 +184,6 @@ export default function App() {
             id: Date.now().toString(),
             nome: nomeTreino,
             dataCriacao: new Date().toISOString(),
-            // Mudamos de 'finalizado' para um array de datas
             datasExecucao: [], // Array para armazenar as datas que o treino foi feito
             exercicios: []
         };
@@ -226,6 +225,25 @@ export default function App() {
         dataCriacao: new Date().toISOString()
     };
     const cicloAtualizado = { ...cicloSelecionado, treinos: [...cicloSelecionado.treinos, novoTreino] };
+    const listaAtualizada = ciclos.map(c => c.id === cicloSelecionado.id ? cicloAtualizado : c);
+    
+    salvarDados(listaAtualizada);
+    setCicloSelecionado(cicloAtualizado);
+  };
+
+  // Função para mover treino
+  const moverTreino = (index, direcao) => {
+    if (!cicloSelecionado) return;
+    
+    const novosTreinos = [...cicloSelecionado.treinos];
+    const novoIndex = direcao === 'up' ? index - 1 : index + 1;
+    
+    if (novoIndex < 0 || novoIndex >= novosTreinos.length) return;
+    
+    // Troca os treinos de posição
+    [novosTreinos[index], novosTreinos[novoIndex]] = [novosTreinos[novoIndex], novosTreinos[index]];
+    
+    const cicloAtualizado = { ...cicloSelecionado, treinos: novosTreinos };
     const listaAtualizada = ciclos.map(c => c.id === cicloSelecionado.id ? cicloAtualizado : c);
     
     salvarDados(listaAtualizada);
@@ -507,12 +525,28 @@ export default function App() {
                     </TouchableOpacity>
                 </View>
             )}
-            renderItem={({ item }) => {
+            renderItem={({ item, index }) => {
               const foiHoje = foiFeitoHoje(item);
               const totalExecucoes = contarExecucoes(item);
               
               return (
                 <View style={styles.cardTreinoContainer}>
+                  {/* Botões de reordenar treino */}
+                  <View style={styles.reorderContainer}>
+                    <TouchableOpacity 
+                      onPress={() => moverTreino(index, 'up')} 
+                      style={[styles.btnArrow, index === 0 && {opacity: 0.3}]} 
+                      disabled={index === 0}>
+                        <Ionicons name="chevron-up" size={20} color={COLORS.primary} />
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                      onPress={() => moverTreino(index, 'down')} 
+                      style={[styles.btnArrow, index === (cicloSelecionado.treinos.length - 1) && {opacity: 0.3}]} 
+                      disabled={index === (cicloSelecionado.treinos.length - 1)}>
+                        <Ionicons name="chevron-down" size={20} color={COLORS.primary} />
+                    </TouchableOpacity>
+                  </View>
+
                   <TouchableOpacity 
                     style={styles.cardContent} 
                     onPress={() => setTreinoSelecionado(item)}>
@@ -877,6 +911,8 @@ const styles = StyleSheet.create({
     borderRadius: 12, 
     marginBottom: 10,
     marginHorizontal: 5,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
   },
   cardExercicioDetalhado: { 
     backgroundColor: COLORS.card, 
@@ -888,7 +924,7 @@ const styles = StyleSheet.create({
     minHeight: 70,
     marginHorizontal: 5,
   },
-  cardContent: { flex: 1 },
+  cardContent: { flex: 1, marginLeft: 10 },
   
   // Textos
   tituloCiclo: { fontSize: 18, fontWeight: '700', color: COLORS.text },
@@ -922,6 +958,7 @@ const styles = StyleSheet.create({
     borderTopColor: COLORS.border, 
     paddingTop: 10,
     paddingHorizontal: 5,
+    width: '100%',
   },
   actionButtonsVertical: { 
     flexDirection: 'column', 
