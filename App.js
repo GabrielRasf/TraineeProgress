@@ -560,7 +560,7 @@ export default function App() {
                         </View>
                         <View style={styles.statusContainer}>
                           <Text style={[styles.textoFinalizado, foiHoje && {color: COLORS.success}]}>
-                            {foiHoje ? "Feito" : "Pendente"}
+                            {foiHoje ? "Feito hoje" : "Pendente"}
                           </Text>
                           <TouchableOpacity 
                             style={[styles.checkbox, foiHoje && styles.checkboxChecked]} 
