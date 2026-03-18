@@ -334,7 +334,7 @@ export default function App() {
         numero: i,
         repeticoes: repsPadrao,
         carga: cargaPadrao,
-        realizado: false,
+        // Removido o campo 'realizado'
         dataRegistro: new Date().toISOString()
       });
     }
@@ -345,7 +345,7 @@ export default function App() {
       tempo: tempoEx,
       velocidade: velocidadeEx,
       horario: horarioEx,
-      series: series, // Agora series é um array de objetos
+      series: series,
     };
     
     let novoTreinoSelecionado = {...treinoSelecionado};
@@ -394,19 +394,17 @@ export default function App() {
               ...s, 
               repeticoes: serieReps,
               carga: serieCarga,
-              realizado: true,
               dataRegistro: new Date().toISOString()
             } 
           : s
       );
     } else {
-      // Adicionar nova série (para quando queremos registrar uma série extra)
+      // Adicionar nova série
       const novaSerie = {
         id: Date.now().toString(),
         numero: exercicioAtual.series.length + 1,
         repeticoes: serieReps,
         carga: serieCarga,
-        realizado: true,
         dataRegistro: new Date().toISOString()
       };
       seriesAtualizadas = [...exercicioAtual.series, novaSerie];
@@ -422,21 +420,6 @@ export default function App() {
     
     atualizarTreinoNoStorage(exerciciosAtualizados);
     fecharModalSerie();
-  };
-
-  const alternarRealizacaoSerie = (exercicio, serie) => {
-    const seriesAtualizadas = exercicio.series.map(s => 
-      s.id === serie.id 
-        ? { ...s, realizado: !s.realizado, dataRegistro: !s.realizado ? new Date().toISOString() : s.dataRegistro } 
-        : s
-    );
-    
-    const exercicioAtualizado = { ...exercicio, series: seriesAtualizadas };
-    const exerciciosAtualizados = treinoSelecionado.exercicios.map(ex => 
-      ex.id === exercicio.id ? exercicioAtualizado : ex
-    );
-    
-    atualizarTreinoNoStorage(exerciciosAtualizados);
   };
 
   const moverExercicio = (index, direcao) => {
@@ -550,10 +533,6 @@ export default function App() {
     if (item.tempo && item.tempo.trim() !== '') partes.push(`${item.tempo.trim()}`);
     if (item.velocidade && item.velocidade.trim() !== '') partes.push(`${item.velocidade.trim()}`);
     return partes.join(' / ');
-  };
-
-  const calcularTotalSeriesRealizadas = (series) => {
-    return series.filter(s => s.realizado).length;
   };
 
   // Função para alternar a expansão de um exercício
@@ -788,7 +767,6 @@ export default function App() {
             )}
             renderItem={({ item, index }) => {
               const totalSeries = item.series ? item.series.length : 0;
-              const seriesRealizadas = item.series ? calcularTotalSeriesRealizadas(item.series) : 0;
               const estaExpandido = exerciciosExpandidos[item.id] || false;
               
               return (
@@ -850,7 +828,7 @@ export default function App() {
                     {/* Mostrar resumo mesmo quando fechado */}
                     <View style={styles.exerciseSummary}>
                       <Text style={styles.seriesTitle}>
-                        Séries: {seriesRealizadas}/{totalSeries}
+                        Séries: {totalSeries}
                       </Text>
                     </View>
                     
@@ -859,12 +837,6 @@ export default function App() {
                       <View style={styles.seriesContainer}>
                         {item.series && item.series.map((serie, idx) => (
                           <View key={serie.id} style={styles.serieItem}>
-                            <TouchableOpacity 
-                              style={[styles.serieCheckbox, serie.realizado && styles.serieCheckboxChecked]}
-                              onPress={() => alternarRealizacaoSerie(item, serie)}>
-                              {serie.realizado && <Ionicons name="checkmark" size={16} color="white" />}
-                            </TouchableOpacity>
-                            
                             <Text style={styles.serieNumero}>{idx + 1}ª série</Text>
                             
                             <Text style={styles.serieInfo}>
@@ -1203,7 +1175,7 @@ const styles = StyleSheet.create({
   barraProgresso: { height: '100%', backgroundColor: COLORS.success },
   textoProgresso: { color: COLORS.textSecondary, fontSize: 12, fontWeight: 'bold', marginTop: 5 },
   
-  // Checkbox
+  // Checkbox (apenas para treinos)
   checkbox: { width: 30, height: 30, borderRadius: 15, borderWidth: 2, borderColor: COLORS.textSecondary, justifyContent: 'center', alignItems: 'center' },
   checkboxChecked: { backgroundColor: COLORS.success, borderColor: COLORS.success },
   statusContainer: { flexDirection: 'row', alignItems: 'center', gap: 10 },
@@ -1284,25 +1256,11 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     marginBottom: 6,
   },
-  serieCheckbox: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: COLORS.textSecondary,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 10,
-  },
-  serieCheckboxChecked: {
-    backgroundColor: COLORS.success,
-    borderColor: COLORS.success,
-  },
   serieNumero: {
     color: COLORS.text,
     fontSize: 13,
     fontWeight: 'bold',
-    width: 50,
+    width: 60,
   },
   serieInfo: {
     color: COLORS.textSecondary,
