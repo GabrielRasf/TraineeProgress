@@ -22,7 +22,8 @@ const COLORS = {
   header: '#121212'
 };
 
-const STORAGE_KEY = '@meus_treinos_final_v10';
+// Chave ÚNICA e PERMANENTE para storage - NUNCA mudar
+const STORAGE_KEY = '@meus_treinos_usuario_v1';
 
 export default function App() {
   const [ciclos, setCiclos] = useState([]);
@@ -35,6 +36,9 @@ export default function App() {
   const [treinoSelecionado, setTreinoSelecionado] = useState(null);
   const [exercicioSelecionado, setExercicioSelecionado] = useState(null);
   const [serieSendoEditada, setSerieSendoEditada] = useState(null);
+
+  // Estado para controlar quais exercícios estão expandidos
+  const [exerciciosExpandidos, setExerciciosExpandidos] = useState({});
 
   // Estados dos inputs
   const [nomeCiclo, setNomeCiclo] = useState('');
@@ -64,7 +68,10 @@ export default function App() {
   const [idCicloSendoEditado, setIdCicloSendoEditado] = useState(null);
   const [idTreinoSendoEditado, setIdTreinoSendoEditado] = useState(null);
 
-  useEffect(() => { carregarDados(); }, []);
+  // Carrega dados ao iniciar - garantido
+  useEffect(() => { 
+    carregarDados(); 
+  }, []);
 
   const carregarDados = async () => {
     try {
@@ -84,7 +91,10 @@ export default function App() {
     try {
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(novosCiclos));
       setCiclos(novosCiclos);
-    } catch (e) { console.log("Erro ao salvar", e); }
+    } catch (e) { 
+      Alert.alert("Erro", "Não foi possível salvar os dados."); 
+      console.log(e); 
+    }
   };
 
   const formatarData = (data) => new Date(data).toLocaleDateString('pt-BR');
@@ -457,6 +467,11 @@ export default function App() {
         { text: "Excluir", onPress: () => {
             const exerciciosAtualizados = treinoSelecionado.exercicios.filter(ex => ex.id !== exId);
             atualizarTreinoNoStorage(exerciciosAtualizados);
+            
+            // Limpar o estado de expansão para este exercício
+            const newExpandidos = {...exerciciosExpandidos};
+            delete newExpandidos[exId];
+            setExerciciosExpandidos(newExpandidos);
         }, style: "destructive" }
     ]);
   };
@@ -539,6 +554,14 @@ export default function App() {
 
   const calcularTotalSeriesRealizadas = (series) => {
     return series.filter(s => s.realizado).length;
+  };
+
+  // Função para alternar a expansão de um exercício
+  const toggleExercicioExpandido = (exercicioId) => {
+    setExerciciosExpandidos(prev => ({
+      ...prev,
+      [exercicioId]: !prev[exercicioId]
+    }));
   };
 
   const ActionButton = ({ icon, color, onPress, label }) => (
@@ -668,7 +691,11 @@ export default function App() {
 
                   <TouchableOpacity 
                     style={styles.cardContent} 
-                    onPress={() => setTreinoSelecionado(item)}>
+                    onPress={() => {
+                      setTreinoSelecionado(item);
+                      // Resetar expansões quando abrir um novo treino
+                      setExerciciosExpandidos({});
+                    }}>
                     <View style={{flex: 1}}>
                       <View style={styles.row}>
                         <View style={{flex: 1}}>
@@ -726,7 +753,10 @@ export default function App() {
       <Modal visible={!!treinoSelecionado} animationType="slide">
         <SafeAreaView style={styles.container}>
           <View style={styles.headerDetalhe}>
-            <TouchableOpacity onPress={() => setTreinoSelecionado(null)}>
+            <TouchableOpacity onPress={() => {
+              setTreinoSelecionado(null);
+              setExerciciosExpandidos({});
+            }}>
               <Ionicons name="arrow-back" size={28} color={COLORS.text} />
             </TouchableOpacity>
             <Text style={styles.headerMenor}>{treinoSelecionado?.nome}</Text>
@@ -759,6 +789,7 @@ export default function App() {
             renderItem={({ item, index }) => {
               const totalSeries = item.series ? item.series.length : 0;
               const seriesRealizadas = item.series ? calcularTotalSeriesRealizadas(item.series) : 0;
+              const estaExpandido = exerciciosExpandidos[item.id] || false;
               
               return (
                 <View style={styles.cardExercicioContainer}>
@@ -779,7 +810,17 @@ export default function App() {
                   
                   <View style={styles.exerciseMainContent}>
                     <View style={styles.exerciseHeader}>
-                      <Text style={styles.nomeEx}>{item.nome}</Text>
+                      <TouchableOpacity 
+                        style={styles.exerciseTitleContainer}
+                        onPress={() => toggleExercicioExpandido(item.id)}>
+                        <Ionicons 
+                          name={estaExpandido ? "chevron-down" : "chevron-forward"} 
+                          size={20} 
+                          color={COLORS.primary} 
+                        />
+                        <Text style={styles.nomeEx}>{item.nome}</Text>
+                      </TouchableOpacity>
+                      
                       <View style={styles.exerciseActions}>
                         <ActionButton
                           icon="pencil-outline"
@@ -806,46 +847,54 @@ export default function App() {
                     
                     <Text style={styles.detalheEx}>{formatarDetalhesExercicio(item)}</Text>
                     
-                    <View style={styles.seriesContainer}>
-                      <Text style={styles.seriesTitle}>Séries: {seriesRealizadas}/{totalSeries}</Text>
-                      
-                      {item.series && item.series.map((serie, idx) => (
-                        <View key={serie.id} style={styles.serieItem}>
-                          <TouchableOpacity 
-                            style={[styles.serieCheckbox, serie.realizado && styles.serieCheckboxChecked]}
-                            onPress={() => alternarRealizacaoSerie(item, serie)}>
-                            {serie.realizado && <Ionicons name="checkmark" size={16} color="white" />}
-                          </TouchableOpacity>
-                          
-                          <Text style={styles.serieNumero}>{idx + 1}ª série</Text>
-                          
-                          <Text style={styles.serieInfo}>
-                            {serie.repeticoes} reps {serie.carga ? ` • ${serie.carga}` : ''}
-                          </Text>
-                          
-                          <View style={styles.serieActions}>
+                    {/* Mostrar resumo mesmo quando fechado */}
+                    <View style={styles.exerciseSummary}>
+                      <Text style={styles.seriesTitle}>
+                        Séries: {seriesRealizadas}/{totalSeries}
+                      </Text>
+                    </View>
+                    
+                    {/* Conteúdo expandido */}
+                    {estaExpandido && (
+                      <View style={styles.seriesContainer}>
+                        {item.series && item.series.map((serie, idx) => (
+                          <View key={serie.id} style={styles.serieItem}>
                             <TouchableOpacity 
-                              style={styles.serieActionBtn}
-                              onPress={() => abrirModalSerie(item, serie)}>
-                              <Ionicons name="create-outline" size={16} color={COLORS.primary} />
+                              style={[styles.serieCheckbox, serie.realizado && styles.serieCheckboxChecked]}
+                              onPress={() => alternarRealizacaoSerie(item, serie)}>
+                              {serie.realizado && <Ionicons name="checkmark" size={16} color="white" />}
                             </TouchableOpacity>
                             
-                            <TouchableOpacity 
-                              style={styles.serieActionBtn}
-                              onPress={() => deletarSerie(item, serie.id)}>
-                              <Ionicons name="close-outline" size={16} color={COLORS.danger} />
-                            </TouchableOpacity>
+                            <Text style={styles.serieNumero}>{idx + 1}ª série</Text>
+                            
+                            <Text style={styles.serieInfo}>
+                              {serie.repeticoes} reps {serie.carga ? ` • ${serie.carga}` : ''}
+                            </Text>
+                            
+                            <View style={styles.serieActions}>
+                              <TouchableOpacity 
+                                style={styles.serieActionBtn}
+                                onPress={() => abrirModalSerie(item, serie)}>
+                                <Ionicons name="create-outline" size={16} color={COLORS.primary} />
+                              </TouchableOpacity>
+                              
+                              <TouchableOpacity 
+                                style={styles.serieActionBtn}
+                                onPress={() => deletarSerie(item, serie.id)}>
+                                <Ionicons name="close-outline" size={16} color={COLORS.danger} />
+                              </TouchableOpacity>
+                            </View>
                           </View>
-                        </View>
-                      ))}
-                      
-                      <TouchableOpacity 
-                        style={styles.adicionarSerieBtn}
-                        onPress={() => abrirModalSerie(item)}>
-                        <Ionicons name="add-circle-outline" size={20} color={COLORS.primary} />
-                        <Text style={styles.adicionarSerieText}>Adicionar Série</Text>
-                      </TouchableOpacity>
-                    </View>
+                        ))}
+                        
+                        <TouchableOpacity 
+                          style={styles.adicionarSerieBtn}
+                          onPress={() => abrirModalSerie(item)}>
+                          <Ionicons name="add-circle-outline" size={20} color={COLORS.primary} />
+                          <Text style={styles.adicionarSerieText}>Adicionar Série</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
                   </View>
                 </View>
               );
@@ -1141,8 +1190,8 @@ const styles = StyleSheet.create({
   // Textos
   tituloCiclo: { fontSize: 18, fontWeight: '700', color: COLORS.text },
   textoData: { color: COLORS.textSecondary, fontSize: 13, marginTop: 2 },
-  nomeEx: { color: COLORS.text, fontSize: 16, fontWeight: 'bold' },
-  detalheEx: { color: COLORS.textSecondary, fontSize: 12, marginTop: 2 },
+  nomeEx: { color: COLORS.text, fontSize: 16, fontWeight: 'bold', marginLeft: 8 },
+  detalheEx: { color: COLORS.textSecondary, fontSize: 12, marginTop: 2, marginLeft: 28 },
   textoFinalizado: { color: COLORS.textSecondary, fontSize: 12, fontWeight: 'bold', fontStyle: 'italic' },
   
   // Layout
@@ -1199,9 +1248,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 4,
   },
+  exerciseTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
   exerciseActions: {
     flexDirection: 'row',
     gap: 8,
+  },
+  exerciseSummary: {
+    marginLeft: 28,
+    marginTop: 2,
   },
   
   // Séries
@@ -1210,6 +1268,7 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     borderTopWidth: 1,
     borderTopColor: COLORS.border,
+    marginLeft: 28,
   },
   seriesTitle: {
     color: COLORS.textSecondary,
@@ -1318,9 +1377,6 @@ const styles = StyleSheet.create({
     padding: 4
   },
   btnArrow: { padding: 4 },
-  
-  // Conteúdo do exercício
-  exerciseContent: { flex: 1 },
   
   // Modais
   modalCentrado: { 
