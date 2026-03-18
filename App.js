@@ -16,21 +16,25 @@ const COLORS = {
   primary: '#3798FF',
   danger: '#FF5252',
   success: '#20c997',
+  warning: '#FFA500',
   border: '#333333',
   input: '#2C2C2C',
   header: '#121212'
 };
 
-const STORAGE_KEY = '@meus_treinos_final_v9';
+const STORAGE_KEY = '@meus_treinos_final_v10';
 
 export default function App() {
   const [ciclos, setCiclos] = useState([]);
   const [modalCicloVisible, setModalCicloVisible] = useState(false);
   const [modalTreinoVisible, setModalTreinoVisible] = useState(false);
   const [modalExercicioVisible, setModalExercicioVisible] = useState(false);
+  const [modalSerieVisible, setModalSerieVisible] = useState(false);
   
   const [cicloSelecionado, setCicloSelecionado] = useState(null);
   const [treinoSelecionado, setTreinoSelecionado] = useState(null);
+  const [exercicioSelecionado, setExercicioSelecionado] = useState(null);
+  const [serieSendoEditada, setSerieSendoEditada] = useState(null);
 
   // Estados dos inputs
   const [nomeCiclo, setNomeCiclo] = useState('');
@@ -40,6 +44,8 @@ export default function App() {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [datePickerMode, setDatePickerMode] = useState('inicio');
   const [nomeTreino, setNomeTreino] = useState('');
+  
+  // Estados para exercício
   const [nomeEx, setNomeEx] = useState('');
   const [seriesEx, setSeriesEx] = useState('');
   const [repsEx, setRepsEx] = useState('');
@@ -47,8 +53,14 @@ export default function App() {
   const [velocidadeEx, setVelocidadeEx] = useState('');
   const [horarioEx, setHorarioEx] = useState('');
   const [cargaEx, setCargaEx] = useState('');
-  const [idExSendoEditado, setIdExSendoEditado] = useState(null);
   
+  // Estados para série individual
+  const [serieNumero, setSerieNumero] = useState('');
+  const [serieReps, setSerieReps] = useState('');
+  const [serieCarga, setSerieCarga] = useState('');
+  const [serieData, setSerieData] = useState(new Date());
+  
+  const [idExSendoEditado, setIdExSendoEditado] = useState(null);
   const [idCicloSendoEditado, setIdCicloSendoEditado] = useState(null);
   const [idTreinoSendoEditado, setIdTreinoSendoEditado] = useState(null);
 
@@ -76,6 +88,7 @@ export default function App() {
   };
 
   const formatarData = (data) => new Date(data).toLocaleDateString('pt-BR');
+  const formatarDataHora = (data) => new Date(data).toLocaleDateString('pt-BR') + ' ' + new Date(data).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
   const obterDataValida = (data) => (!data || isNaN(new Date(data).getTime())) ? new Date() : new Date(data);
 
   const calcularTotalTreinos = (inicio, fim, freq) => {
@@ -165,7 +178,6 @@ export default function App() {
     let listaAtualizada;
     
     if (idTreinoSendoEditado) {
-        // Editando treino existente
         const treinosAtualizados = cicloSelecionado.treinos.map(t => 
             t.id === idTreinoSendoEditado ? {...t, nome: nomeTreino} : t
         );
@@ -174,17 +186,15 @@ export default function App() {
         
         setCicloSelecionado(cicloAtualizado);
         
-        // Se o treino sendo editado é o que está aberto, atualiza também
         if (treinoSelecionado && treinoSelecionado.id === idTreinoSendoEditado) {
           setTreinoSelecionado({...treinoSelecionado, nome: nomeTreino});
         }
     } else {
-        // Adicionando novo treino - com contador de execuções
         const novoTreino = {
             id: Date.now().toString(),
             nome: nomeTreino,
             dataCriacao: new Date().toISOString(),
-            datasExecucao: [], // Array para armazenar as datas que o treino foi feito
+            datasExecucao: [],
             exercicios: []
         };
         const cicloAtualizado = { ...cicloSelecionado, treinos: [...cicloSelecionado.treinos, novoTreino] };
@@ -208,7 +218,6 @@ export default function App() {
             salvarDados(listaAtualizada);
             setCicloSelecionado(cicloAtualizado);
             
-            // Se o treino deletado é o que está aberto, fecha o modal
             if (treinoSelecionado && treinoSelecionado.id === treinoId) {
               setTreinoSelecionado(null);
             }
@@ -221,7 +230,7 @@ export default function App() {
         ...treinoParaCopiar,
         id: Date.now().toString(),
         nome: `${treinoParaCopiar.nome} (Cópia)`,
-        datasExecucao: [], // Começa sem execuções
+        datasExecucao: [],
         dataCriacao: new Date().toISOString()
     };
     const cicloAtualizado = { ...cicloSelecionado, treinos: [...cicloSelecionado.treinos, novoTreino] };
@@ -231,7 +240,6 @@ export default function App() {
     setCicloSelecionado(cicloAtualizado);
   };
 
-  // Função para mover treino
   const moverTreino = (index, direcao) => {
     if (!cicloSelecionado) return;
     
@@ -240,7 +248,6 @@ export default function App() {
     
     if (novoIndex < 0 || novoIndex >= novosTreinos.length) return;
     
-    // Troca os treinos de posição
     [novosTreinos[index], novosTreinos[novoIndex]] = [novosTreinos[novoIndex], novosTreinos[index]];
     
     const cicloAtualizado = { ...cicloSelecionado, treinos: novosTreinos };
@@ -250,7 +257,6 @@ export default function App() {
     setCicloSelecionado(cicloAtualizado);
   };
 
-  // Função para verificar se o treino já foi feito hoje
   const foiFeitoHoje = (treino) => {
     if (!treino.datasExecucao || treino.datasExecucao.length === 0) return false;
     
@@ -258,12 +264,10 @@ export default function App() {
     return treino.datasExecucao.some(data => new Date(data).toDateString() === hoje);
   };
 
-  // Função para contar quantas vezes o treino foi feito no total
   const contarExecucoes = (treino) => {
     return treino.datasExecucao ? treino.datasExecucao.length : 0;
   };
 
-  // Função atualizada para marcar/desmarcar treino
   const alternarExecucaoTreino = (treinoId) => {
     const hoje = new Date().toISOString();
     
@@ -272,7 +276,6 @@ export default function App() {
         const jaFoiHoje = foiFeitoHoje(t);
         
         if (jaFoiHoje) {
-          // Remove a execução de hoje
           return {
             ...t,
             datasExecucao: t.datasExecucao.filter(data => 
@@ -280,7 +283,6 @@ export default function App() {
             )
           };
         } else {
-          // Adiciona nova execução
           return {
             ...t,
             datasExecucao: [...(t.datasExecucao || []), hoje]
@@ -296,7 +298,6 @@ export default function App() {
     salvarDados(listaAtualizada);
     setCicloSelecionado(cicloAtualizado);
     
-    // Atualiza treinoSelecionado se ele estiver aberto
     if (treinoSelecionado && treinoSelecionado.id === treinoId) {
       const treinoAtualizado = treinosAtualizados.find(t => t.id === treinoId);
       setTreinoSelecionado(treinoAtualizado);
@@ -311,15 +312,30 @@ export default function App() {
     
     if (!treinoSelecionado) return;
     
+    // Criar estrutura de séries baseada no input
+    const series = [];
+    const numSeries = parseInt(seriesEx) || 0;
+    const repsPadrao = repsEx;
+    const cargaPadrao = cargaEx;
+    
+    for (let i = 1; i <= numSeries; i++) {
+      series.push({
+        id: `${Date.now()}_${i}`,
+        numero: i,
+        repeticoes: repsPadrao,
+        carga: cargaPadrao,
+        realizado: false,
+        dataRegistro: new Date().toISOString()
+      });
+    }
+    
     const exData = {
       id: idExSendoEditado || Date.now().toString(),
       nome: nomeEx,
-      series: seriesEx,
-      reps: repsEx,
       tempo: tempoEx,
       velocidade: velocidadeEx,
       horario: horarioEx,
-      carga: cargaEx,
+      series: series, // Agora series é um array de objetos
     };
     
     let novoTreinoSelecionado = {...treinoSelecionado};
@@ -342,6 +358,75 @@ export default function App() {
     setCicloSelecionado(cicloAtualizado);
     setTreinoSelecionado(novoTreinoSelecionado);
     fecharModalExercicio();
+  };
+
+  const salvarSerie = () => {
+    if (!exercicioSelecionado || !treinoSelecionado) return;
+    
+    const repeticoesInt = parseInt(serieReps) || 0;
+    
+    if (repeticoesInt <= 0) {
+      Alert.alert("Erro", "Número de repetições deve ser maior que zero");
+      return;
+    }
+    
+    // Encontrar o exercício atual
+    const exercicioAtual = treinoSelecionado.exercicios.find(ex => ex.id === exercicioSelecionado.id);
+    if (!exercicioAtual) return;
+    
+    let seriesAtualizadas;
+    
+    if (serieSendoEditada) {
+      // Editar série existente
+      seriesAtualizadas = exercicioAtual.series.map(s => 
+        s.id === serieSendoEditada.id 
+          ? { 
+              ...s, 
+              repeticoes: serieReps,
+              carga: serieCarga,
+              realizado: true,
+              dataRegistro: new Date().toISOString()
+            } 
+          : s
+      );
+    } else {
+      // Adicionar nova série (para quando queremos registrar uma série extra)
+      const novaSerie = {
+        id: Date.now().toString(),
+        numero: exercicioAtual.series.length + 1,
+        repeticoes: serieReps,
+        carga: serieCarga,
+        realizado: true,
+        dataRegistro: new Date().toISOString()
+      };
+      seriesAtualizadas = [...exercicioAtual.series, novaSerie];
+    }
+    
+    // Atualizar o exercício
+    const exercicioAtualizado = { ...exercicioAtual, series: seriesAtualizadas };
+    
+    // Atualizar o treino
+    const exerciciosAtualizados = treinoSelecionado.exercicios.map(ex => 
+      ex.id === exercicioSelecionado.id ? exercicioAtualizado : ex
+    );
+    
+    atualizarTreinoNoStorage(exerciciosAtualizados);
+    fecharModalSerie();
+  };
+
+  const alternarRealizacaoSerie = (exercicio, serie) => {
+    const seriesAtualizadas = exercicio.series.map(s => 
+      s.id === serie.id 
+        ? { ...s, realizado: !s.realizado, dataRegistro: !s.realizado ? new Date().toISOString() : s.dataRegistro } 
+        : s
+    );
+    
+    const exercicioAtualizado = { ...exercicio, series: seriesAtualizadas };
+    const exerciciosAtualizados = treinoSelecionado.exercicios.map(ex => 
+      ex.id === exercicio.id ? exercicioAtualizado : ex
+    );
+    
+    atualizarTreinoNoStorage(exerciciosAtualizados);
   };
 
   const moverExercicio = (index, direcao) => {
@@ -376,6 +461,38 @@ export default function App() {
     ]);
   };
 
+  const deletarSerie = (exercicio, serieId) => {
+    Alert.alert("Remover Série", "Deseja remover esta série?", [
+      { text: "Cancelar", style: "cancel" },
+      { text: "Remover", onPress: () => {
+          const seriesAtualizadas = exercicio.series.filter(s => s.id !== serieId);
+          const exercicioAtualizado = { ...exercicio, series: seriesAtualizadas };
+          const exerciciosAtualizados = treinoSelecionado.exercicios.map(ex => 
+            ex.id === exercicio.id ? exercicioAtualizado : ex
+          );
+          atualizarTreinoNoStorage(exerciciosAtualizados);
+        }, 
+        style: "destructive" 
+      }
+    ]);
+  };
+
+  const abrirModalSerie = (exercicio, serie = null) => {
+    setExercicioSelecionado(exercicio);
+    if (serie) {
+      setSerieSendoEditada(serie);
+      setSerieNumero(serie.numero.toString());
+      setSerieReps(serie.repeticoes.toString());
+      setSerieCarga(serie.carga || '');
+    } else {
+      setSerieSendoEditada(null);
+      setSerieNumero('');
+      setSerieReps('');
+      setSerieCarga('');
+    }
+    setModalSerieVisible(true);
+  };
+
   const fecharModalCiclo = () => { 
     setNomeCiclo(''); 
     setDataInicio(new Date()); 
@@ -403,23 +520,27 @@ export default function App() {
     setModalExercicioVisible(false); 
   };
 
+  const fecharModalSerie = () => {
+    setExercicioSelecionado(null);
+    setSerieSendoEditada(null);
+    setSerieNumero('');
+    setSerieReps('');
+    setSerieCarga('');
+    setModalSerieVisible(false);
+  };
+
   const formatarDetalhesExercicio = (item) => {
     const partes = [];
-    if (item.carga && item.carga.trim() !== '') partes.push(`${item.carga.trim()}`);
     if (item.horario && item.horario.trim() !== '') partes.push(`${item.horario.trim()}`);
-    if ((item.series && item.series.trim() !== '') && (item.reps && item.reps.trim() !== '')) {
-        partes.push(`${item.series.trim()} x ${item.reps.trim()} `);
-    } else if (item.series && item.series.trim() !== '') {
-        partes.push(`${item.series.trim()} `);
-    } else if (item.reps && item.reps.trim() !== '') {
-        partes.push(`${item.reps.trim()} `);
-    }
     if (item.tempo && item.tempo.trim() !== '') partes.push(`${item.tempo.trim()}`);
     if (item.velocidade && item.velocidade.trim() !== '') partes.push(`${item.velocidade.trim()}`);
     return partes.join(' / ');
   };
 
-  // Componente de botão de ação padronizado
+  const calcularTotalSeriesRealizadas = (series) => {
+    return series.filter(s => s.realizado).length;
+  };
+
   const ActionButton = ({ icon, color, onPress, label }) => (
     <TouchableOpacity style={styles.actionButton} onPress={onPress}>
       <Ionicons name={icon} size={18} color={color} />
@@ -445,7 +566,6 @@ export default function App() {
         )}
         renderItem={({ item }) => {
           const listaTreinos = item.treinos || [];
-          // Soma todas as execuções de todos os treinos
           const totalExecucoes = listaTreinos.reduce((acc, treino) => 
             acc + (treino.datasExecucao ? treino.datasExecucao.length : 0), 0
           );
@@ -531,7 +651,6 @@ export default function App() {
               
               return (
                 <View style={styles.cardTreinoContainer}>
-                  {/* Botões de reordenar treino */}
                   <View style={styles.reorderContainer}>
                     <TouchableOpacity 
                       onPress={() => moverTreino(index, 'up')} 
@@ -572,7 +691,6 @@ export default function App() {
                     </View>
                   </TouchableOpacity>
 
-                  {/* Botões de ação do treino */}
                   <View style={styles.actionButtonsRow}>
                     <ActionButton
                       icon="pencil-outline"
@@ -638,52 +756,100 @@ export default function App() {
                 <Text style={styles.textAdicionar}>Adicionar Exercício</Text>
               </TouchableOpacity>
             )}
-            renderItem={({ item, index }) => (
-              <View style={styles.cardExercicioDetalhado}>
-                <View style={styles.reorderContainer}>
-                  <TouchableOpacity 
-                    onPress={() => moverExercicio(index, 'up')} 
-                    style={[styles.btnArrow, index === 0 && {opacity: 0.3}]} 
-                    disabled={index === 0}>
-                      <Ionicons name="chevron-up" size={20} color={COLORS.primary} />
-                  </TouchableOpacity>
-                  <TouchableOpacity 
-                    onPress={() => moverExercicio(index, 'down')} 
-                    style={[styles.btnArrow, index === (treinoSelecionado.exercicios.length - 1) && {opacity: 0.3}]} 
-                    disabled={index === (treinoSelecionado.exercicios.length - 1)}>
-                      <Ionicons name="chevron-down" size={20} color={COLORS.primary} />
-                  </TouchableOpacity>
+            renderItem={({ item, index }) => {
+              const totalSeries = item.series ? item.series.length : 0;
+              const seriesRealizadas = item.series ? calcularTotalSeriesRealizadas(item.series) : 0;
+              
+              return (
+                <View style={styles.cardExercicioContainer}>
+                  <View style={styles.reorderContainer}>
+                    <TouchableOpacity 
+                      onPress={() => moverExercicio(index, 'up')} 
+                      style={[styles.btnArrow, index === 0 && {opacity: 0.3}]} 
+                      disabled={index === 0}>
+                        <Ionicons name="chevron-up" size={20} color={COLORS.primary} />
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                      onPress={() => moverExercicio(index, 'down')} 
+                      style={[styles.btnArrow, index === (treinoSelecionado.exercicios.length - 1) && {opacity: 0.3}]} 
+                      disabled={index === (treinoSelecionado.exercicios.length - 1)}>
+                        <Ionicons name="chevron-down" size={20} color={COLORS.primary} />
+                    </TouchableOpacity>
+                  </View>
+                  
+                  <View style={styles.exerciseMainContent}>
+                    <View style={styles.exerciseHeader}>
+                      <Text style={styles.nomeEx}>{item.nome}</Text>
+                      <View style={styles.exerciseActions}>
+                        <ActionButton
+                          icon="pencil-outline"
+                          color={COLORS.primary}
+                          onPress={() => {
+                            setIdExSendoEditado(item.id);
+                            setNomeEx(item.nome);
+                            setSeriesEx(item.series ? item.series.length.toString() : '');
+                            setRepsEx(item.series && item.series[0] ? item.series[0].repeticoes : '');
+                            setTempoEx(item.tempo);
+                            setVelocidadeEx(item.velocidade);
+                            setHorarioEx(item.horario || '');
+                            setCargaEx(item.series && item.series[0] ? item.series[0].carga : '');
+                            setModalExercicioVisible(true);
+                          }}
+                        />
+                        <ActionButton
+                          icon="trash-outline"
+                          color={COLORS.danger}
+                          onPress={() => deletarExercicio(item.id)}
+                        />
+                      </View>
+                    </View>
+                    
+                    <Text style={styles.detalheEx}>{formatarDetalhesExercicio(item)}</Text>
+                    
+                    <View style={styles.seriesContainer}>
+                      <Text style={styles.seriesTitle}>Séries: {seriesRealizadas}/{totalSeries}</Text>
+                      
+                      {item.series && item.series.map((serie, idx) => (
+                        <View key={serie.id} style={styles.serieItem}>
+                          <TouchableOpacity 
+                            style={[styles.serieCheckbox, serie.realizado && styles.serieCheckboxChecked]}
+                            onPress={() => alternarRealizacaoSerie(item, serie)}>
+                            {serie.realizado && <Ionicons name="checkmark" size={16} color="white" />}
+                          </TouchableOpacity>
+                          
+                          <Text style={styles.serieNumero}>{idx + 1}ª série</Text>
+                          
+                          <Text style={styles.serieInfo}>
+                            {serie.repeticoes} reps {serie.carga ? ` • ${serie.carga}` : ''}
+                          </Text>
+                          
+                          <View style={styles.serieActions}>
+                            <TouchableOpacity 
+                              style={styles.serieActionBtn}
+                              onPress={() => abrirModalSerie(item, serie)}>
+                              <Ionicons name="create-outline" size={16} color={COLORS.primary} />
+                            </TouchableOpacity>
+                            
+                            <TouchableOpacity 
+                              style={styles.serieActionBtn}
+                              onPress={() => deletarSerie(item, serie.id)}>
+                              <Ionicons name="close-outline" size={16} color={COLORS.danger} />
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      ))}
+                      
+                      <TouchableOpacity 
+                        style={styles.adicionarSerieBtn}
+                        onPress={() => abrirModalSerie(item)}>
+                        <Ionicons name="add-circle-outline" size={20} color={COLORS.primary} />
+                        <Text style={styles.adicionarSerieText}>Adicionar Série</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
                 </View>
-                
-                <View style={styles.exerciseContent}>
-                  <Text style={styles.nomeEx}>{item.nome}</Text>
-                  <Text style={styles.detalheEx}>{formatarDetalhesExercicio(item)}</Text>
-                </View>
-
-                <View style={styles.actionButtonsVertical}>
-                  <ActionButton
-                    icon="pencil-outline"
-                    color={COLORS.primary}
-                    onPress={() => {
-                      setIdExSendoEditado(item.id);
-                      setNomeEx(item.nome);
-                      setSeriesEx(item.series);
-                      setRepsEx(item.reps);
-                      setTempoEx(item.tempo);
-                      setVelocidadeEx(item.velocidade);
-                      setHorarioEx(item.horario || '');
-                      setCargaEx(item.carga || '');
-                      setModalExercicioVisible(true);
-                    }}
-                  />
-                  <ActionButton
-                    icon="trash-outline"
-                    color={COLORS.danger}
-                    onPress={() => deletarExercicio(item.id)}
-                  />
-                </View>
-              </View>
-            )}
+              );
+            }}
           />
         </SafeAreaView>
       </Modal>
@@ -788,7 +954,25 @@ export default function App() {
               
               <TextInput 
                 style={styles.input} 
-                placeholder="Carga (ex: 20kg)" 
+                placeholder="Número de séries (ex: 3)" 
+                placeholderTextColor={COLORS.textSecondary} 
+                value={seriesEx} 
+                onChangeText={setSeriesEx} 
+                keyboardType="numeric" 
+              />
+              
+              <TextInput 
+                style={styles.input} 
+                placeholder="Repetições padrão (ex: 12)" 
+                placeholderTextColor={COLORS.textSecondary} 
+                value={repsEx} 
+                onChangeText={setRepsEx} 
+                keyboardType="numeric" 
+              />
+              
+              <TextInput 
+                style={styles.input} 
+                placeholder="Carga padrão (ex: 20kg)" 
                 placeholderTextColor={COLORS.textSecondary} 
                 value={cargaEx} 
                 onChangeText={setCargaEx} 
@@ -800,24 +984,6 @@ export default function App() {
                 placeholderTextColor={COLORS.textSecondary} 
                 value={horarioEx} 
                 onChangeText={setHorarioEx} 
-              />
-              
-              <TextInput 
-                style={styles.input} 
-                placeholder="Séries (ex: 3)" 
-                placeholderTextColor={COLORS.textSecondary} 
-                value={seriesEx} 
-                onChangeText={setSeriesEx} 
-                keyboardType="numeric" 
-              />
-              
-              <TextInput 
-                style={styles.input} 
-                placeholder="Repetições (ex: 12)" 
-                placeholderTextColor={COLORS.textSecondary} 
-                value={repsEx} 
-                onChangeText={setRepsEx} 
-                keyboardType="numeric" 
               />
               
               <TextInput 
@@ -841,6 +1007,54 @@ export default function App() {
                   <Text style={styles.modalButtonTexto}>Salvar</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.modalButtonCancelar} onPress={fecharModalExercicio}>
+                  <Text style={styles.modalButtonTexto}>Cancelar</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      <Modal visible={modalSerieVisible} transparent animationType="fade">
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalCentrado}>
+          <ScrollView 
+            contentContainerStyle={styles.modalScrollContent}
+            showsVerticalScrollIndicator={false}>
+            <View style={styles.modalView}>
+              <Text style={styles.modalTitulo}>{serieSendoEditada ? "Editar Série" : "Nova Série"}</Text>
+              
+              <TextInput 
+                style={styles.input} 
+                placeholder="Número da série" 
+                placeholderTextColor={COLORS.textSecondary} 
+                value={serieNumero} 
+                onChangeText={setSerieNumero} 
+                keyboardType="numeric" 
+                editable={false}
+              />
+              
+              <TextInput 
+                style={styles.input} 
+                placeholder="Repetições realizadas" 
+                placeholderTextColor={COLORS.textSecondary} 
+                value={serieReps} 
+                onChangeText={setSerieReps} 
+                keyboardType="numeric" 
+              />
+              
+              <TextInput 
+                style={styles.input} 
+                placeholder="Carga utilizada" 
+                placeholderTextColor={COLORS.textSecondary} 
+                value={serieCarga} 
+                onChangeText={setSerieCarga} 
+              />
+
+              <View style={styles.modalButtonsContainer}>
+                <TouchableOpacity style={styles.modalButtonSalvar} onPress={salvarSerie}>
+                  <Text style={styles.modalButtonTexto}>Salvar</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.modalButtonCancelar} onPress={fecharModalSerie}>
                   <Text style={styles.modalButtonTexto}>Cancelar</Text>
                 </TouchableOpacity>
               </View>
@@ -914,15 +1128,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
   },
-  cardExercicioDetalhado: { 
-    backgroundColor: COLORS.card, 
-    padding: 15, 
-    borderRadius: 12, 
-    marginBottom: 10, 
-    flexDirection: 'row', 
-    alignItems: 'center',
-    minHeight: 70,
+  cardExercicioContainer: {
+    backgroundColor: COLORS.card,
+    borderRadius: 12,
+    marginBottom: 15,
     marginHorizontal: 5,
+    flexDirection: 'row',
+    padding: 12,
   },
   cardContent: { flex: 1, marginLeft: 10 },
   
@@ -960,11 +1172,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 5,
     width: '100%',
   },
-  actionButtonsVertical: { 
-    flexDirection: 'column', 
-    gap: 8,
-    marginLeft: 10
-  },
   actionButton: { 
     padding: 8, 
     backgroundColor: COLORS.input, 
@@ -979,6 +1186,93 @@ const styles = StyleSheet.create({
     fontSize: 12, 
     fontWeight: '500',
     marginLeft: 2
+  },
+  
+  // Exercício
+  exerciseMainContent: {
+    flex: 1,
+    marginLeft: 10,
+  },
+  exerciseHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  exerciseActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  
+  // Séries
+  seriesContainer: {
+    marginTop: 10,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+  },
+  seriesTitle: {
+    color: COLORS.textSecondary,
+    fontSize: 13,
+    fontWeight: 'bold',
+    marginBottom: 8,
+  },
+  serieItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.input,
+    padding: 8,
+    borderRadius: 8,
+    marginBottom: 6,
+  },
+  serieCheckbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: COLORS.textSecondary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 10,
+  },
+  serieCheckboxChecked: {
+    backgroundColor: COLORS.success,
+    borderColor: COLORS.success,
+  },
+  serieNumero: {
+    color: COLORS.text,
+    fontSize: 13,
+    fontWeight: 'bold',
+    width: 50,
+  },
+  serieInfo: {
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    flex: 1,
+  },
+  serieActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  serieActionBtn: {
+    padding: 4,
+  },
+  adicionarSerieBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    padding: 8,
+    borderWidth: 1,
+    borderColor: COLORS.primary,
+    borderStyle: 'dashed',
+    borderRadius: 8,
+    marginTop: 8,
+  },
+  adicionarSerieText: {
+    color: COLORS.primary,
+    fontSize: 13,
+    fontWeight: '500',
   },
   
   // Botões individuais
