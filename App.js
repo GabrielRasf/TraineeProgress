@@ -179,6 +179,36 @@ export default function App() {
     ]);
   };
 
+  const copiarCiclo = (cicloParaCopiar) => {
+    // Deep copy the cycle and reset all IDs to create a new cycle
+    const novoCiclo = {
+      ...cicloParaCopiar,
+      id: Date.now().toString(),
+      nome: `${cicloParaCopiar.nome} (Cópia)`,
+      dataInicio: new Date().toISOString(), // Start from today
+      dataFim: new Date(new Date().setDate(new Date().getDate() + 30)).toISOString(), // Default to 30 days
+      metaTotal: cicloParaCopiar.metaTotal,
+      frequenciaSemanal: cicloParaCopiar.frequenciaSemanal,
+      treinos: cicloParaCopiar.treinos.map(treino => ({
+        ...treino,
+        id: `${Date.now()}_${Math.random()}`,
+        datasExecucao: [], // Reset execution dates for the new cycle
+        dataCriacao: new Date().toISOString(),
+        exercicios: treino.exercicios.map(exercicio => ({
+          ...exercicio,
+          id: `${Date.now()}_${Math.random()}`,
+          series: exercicio.series.map(serie => ({
+            ...serie,
+            id: `${Date.now()}_${Math.random()}`,
+            dataRegistro: new Date().toISOString()
+          }))
+        }))
+      }))
+    };
+    
+    salvarDados([...ciclos, novoCiclo]);
+  };
+
   const salvarTreino = () => {
     if (!nomeTreino.trim() || !cicloSelecionado) {
       Alert.alert("Erro", "Nome do treino é obrigatório");
@@ -583,6 +613,11 @@ export default function App() {
                     <Text style={styles.textoData}>{formatarData(item.dataInicio)} - {formatarData(item.dataFim)}</Text>
                   </View>
                   <View style={styles.actionButtonsContainer}>
+                    <ActionButton
+                      icon="copy-outline"
+                      color={COLORS.textSecondary}
+                      onPress={() => copiarCiclo(item)}
+                    />
                     <ActionButton
                       icon="pencil-outline"
                       color={COLORS.primary}
