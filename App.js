@@ -1,49 +1,228 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   StyleSheet, Text, View, FlatList, TouchableOpacity,
   TextInput, Modal, Alert, SafeAreaView, KeyboardAvoidingView, Platform, StatusBar,
-  ScrollView
+  ScrollView, ActivityIndicator
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 
 const COLORS = {
-  background: '#121212',
-  card: '#1E1E1E',
-  text: '#FFFFFF',
-  textSecondary: '#A0A0A0',
-  primary: '#3798FF',
-  danger: '#FF5252',
-  success: '#20c997',
-  warning: '#FFA500',
-  border: '#333333',
-  input: '#2C2C2C',
-  header: '#121212'
+  background: '#12141C',
+  card: '#1B1F2A',
+  text: '#F2F4F8',
+  textSecondary: '#9AA3B5',
+  primary: '#7B93FF',
+  primaryStrong: '#4263EB',
+  onPrimary: '#FFFFFF',
+  danger: '#FF6B6B',
+  success: '#34C38F',
+  warning: '#F5A524',
+  border: '#2A3040',
+  input: '#252A37',
+  overlay: 'rgba(8, 10, 16, 0.75)',
+  header: '#12141C'
 };
 
 // Chave ÚNICA e PERMANENTE para storage - NUNCA mudar
 const STORAGE_KEY = '@meus_treinos_usuario_v1';
 
+const MAX_SERIES = 20;
+const DIA_MS = 1000 * 60 * 60 * 24;
+
+const gerarId = () => `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+
+const obterDataValida = (data) => (!data || isNaN(new Date(data).getTime())) ? new Date() : new Date(data);
+
+const inicioDoDia = (data) => {
+  const d = obterDataValida(data);
+  d.setHours(0, 0, 0, 0);
+  return d;
+};
+
+const formatarData = (data) => obterDataValida(data).toLocaleDateString('pt-BR');
+
+const paraValorInputData = (data) => {
+  const d = obterDataValida(data);
+  const mes = String(d.getMonth() + 1).padStart(2, '0');
+  const dia = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${mes}-${dia}`;
+};
+
+// "AAAA-MM-DD" precisa virar data local; new Date("AAAA-MM-DD") interpreta como UTC e pode voltar um dia.
+const deValorInputData = (valor) => {
+  const [ano, mes, dia] = (valor || '').split('-').map(Number);
+  if (!ano || !mes || !dia) return null;
+  return new Date(ano, mes - 1, dia);
+};
+
+const calcularTotalTreinos = (inicio, fim, freq) => {
+  const diffDays = Math.round(Math.abs(inicioDoDia(fim) - inicioDoDia(inicio)) / DIA_MS) + 1;
+  const totalTreinos = Math.ceil((diffDays / 7) * freq);
+  return Math.max(totalTreinos, 1);
+};
+
+const ehInteiroPositivo = (texto) => /^\d+$/.test(texto) && Number(texto) > 0;
+
+// No navegador, Alert.alert do react-native-web não faz nada.
+const avisar = (titulo, mensagem) => {
+  if (Platform.OS === 'web') {
+    window.alert(`${titulo}\n\n${mensagem}`);
+    return;
+  }
+  Alert.alert(titulo, mensagem);
+};
+
+const confirmar = (titulo, mensagem, textoConfirmar, aoConfirmar) => {
+  if (Platform.OS === 'web') {
+    if (window.confirm(`${titulo}\n\n${mensagem}`)) aoConfirmar();
+    return;
+  }
+  Alert.alert(titulo, mensagem, [
+    { text: 'Cancelar', style: 'cancel' },
+    { text: textoConfirmar, onPress: aoConfirmar, style: 'destructive' }
+  ]);
+};
+
+const normalizarCiclos = (dados) => {
+  if (!Array.isArray(dados)) throw new Error('Formato de dados inválido');
+  const comoLista = (valor) => (Array.isArray(valor) ? valor.filter(item => item && typeof item === 'object') : []);
+  const comoTexto = (valor) => (valor === null || valor === undefined ? '' : String(valor));
+
+  return comoLista(dados).map(ciclo => ({
+    ...ciclo,
+    id: comoTexto(ciclo.id) || gerarId(),
+    nome: comoTexto(ciclo.nome),
+    dataInicio: obterDataValida(ciclo.dataInicio).toISOString(),
+    dataFim: obterDataValida(ciclo.dataFim).toISOString(),
+    frequenciaSemanal: Number(ciclo.frequenciaSemanal) || 1,
+    metaTotal: Number(ciclo.metaTotal) || 1,
+    treinos: comoLista(ciclo.treinos).map(treino => ({
+      ...treino,
+      id: comoTexto(treino.id) || gerarId(),
+      nome: comoTexto(treino.nome),
+      datasExecucao: Array.isArray(treino.datasExecucao) ? treino.datasExecucao : [],
+      exercicios: comoLista(treino.exercicios).map(exercicio => ({
+        ...exercicio,
+        id: comoTexto(exercicio.id) || gerarId(),
+        nome: comoTexto(exercicio.nome),
+        tempo: comoTexto(exercicio.tempo),
+        velocidade: comoTexto(exercicio.velocidade),
+        horario: comoTexto(exercicio.horario),
+        series: comoLista(exercicio.series).map((serie, indice) => ({
+          ...serie,
+          id: comoTexto(serie.id) || gerarId(),
+          numero: indice + 1,
+          repeticoes: comoTexto(serie.repeticoes),
+          carga: comoTexto(serie.carga),
+        })),
+      })),
+    })),
+  }));
+};
+
+const clonarTreino = (treino) => {
+  const agora = new Date().toISOString();
+  return {
+    ...treino,
+    id: gerarId(),
+    datasExecucao: [],
+    dataCriacao: agora,
+    exercicios: treino.exercicios.map(exercicio => ({
+      ...exercicio,
+      id: gerarId(),
+      series: exercicio.series.map(serie => ({ ...serie, id: gerarId(), dataRegistro: agora }))
+    }))
+  };
+};
+
+const renumerarSeries = (series) => series.map((serie, indice) => ({ ...serie, numero: indice + 1 }));
+
+const estiloInputDataWeb = {
+  backgroundColor: 'transparent',
+  color: COLORS.text,
+  border: 'none',
+  outline: 'none',
+  fontSize: 15,
+  fontFamily: 'inherit',
+  colorScheme: 'dark',
+  textAlign: 'center',
+  width: '100%',
+  marginTop: 4,
+  cursor: 'pointer',
+};
+
+function CampoData({ rotulo, valor, minimo, onSelecionar, onAbrir }) {
+  if (Platform.OS === 'web') {
+    return (
+      <View style={styles.btnData}>
+        <Text style={styles.rotuloData}>{rotulo}</Text>
+        {React.createElement('input', {
+          type: 'date',
+          value: paraValorInputData(valor),
+          min: minimo ? paraValorInputData(minimo) : undefined,
+          'aria-label': rotulo,
+          style: estiloInputDataWeb,
+          onChange: (evento) => {
+            const data = deValorInputData(evento.target.value);
+            if (data) onSelecionar(data);
+          },
+        })}
+      </View>
+    );
+  }
+
+  return (
+    <TouchableOpacity
+      style={styles.btnData}
+      onPress={onAbrir}
+      accessibilityRole="button"
+      accessibilityLabel={`${rotulo}: ${formatarData(valor)}`}>
+      <Text style={styles.rotuloData}>{rotulo}</Text>
+      <Text style={styles.btnDataTexto}>{formatarData(valor)}</Text>
+    </TouchableOpacity>
+  );
+}
+
+function ActionButton({ icon, color, onPress, label, accessibilityLabel }) {
+  return (
+    <TouchableOpacity
+      style={styles.actionButton}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel || label}>
+      <Ionicons name={icon} size={18} color={color} />
+      {label && <Text style={[styles.actionButtonText, { color }]}>{label}</Text>}
+    </TouchableOpacity>
+  );
+}
+
 export default function App() {
   const [ciclos, setCiclos] = useState([]);
+  const [carregando, setCarregando] = useState(true);
+  const [erroCarregamento, setErroCarregamento] = useState(false);
+  const ciclosRef = useRef([]);
+  const filaGravacao = useRef(Promise.resolve());
+  const gravacaoBloqueada = useRef(true);
+
   const [modalCicloVisible, setModalCicloVisible] = useState(false);
   const [modalTreinoVisible, setModalTreinoVisible] = useState(false);
   const [modalExercicioVisible, setModalExercicioVisible] = useState(false);
   const [modalSerieVisible, setModalSerieVisible] = useState(false);
   
-  const [cicloSelecionado, setCicloSelecionado] = useState(null);
-  const [treinoSelecionado, setTreinoSelecionado] = useState(null);
-  const [exercicioSelecionado, setExercicioSelecionado] = useState(null);
-  const [serieSendoEditada, setSerieSendoEditada] = useState(null);
+  const [cicloSelecionadoId, setCicloSelecionadoId] = useState(null);
+  const [treinoSelecionadoId, setTreinoSelecionadoId] = useState(null);
+  const [exercicioSelecionadoId, setExercicioSelecionadoId] = useState(null);
+  const [serieSendoEditadaId, setSerieSendoEditadaId] = useState(null);
 
   // Estado para controlar quais exercícios estão expandidos
   const [exerciciosExpandidos, setExerciciosExpandidos] = useState({});
 
   // Estados dos inputs
   const [nomeCiclo, setNomeCiclo] = useState('');
-  const [dataInicio, setDataInicio] = useState(new Date());
-  const [dataFim, setDataFim] = useState(new Date());
+  const [dataInicio, setDataInicio] = useState(() => inicioDoDia(new Date()));
+  const [dataFim, setDataFim] = useState(() => inicioDoDia(new Date()));
   const [treinosPorSemana, setTreinosPorSemana] = useState(''); 
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [datePickerMode, setDatePickerMode] = useState('inicio');
@@ -57,249 +236,230 @@ export default function App() {
   const [velocidadeEx, setVelocidadeEx] = useState('');
   const [horarioEx, setHorarioEx] = useState('');
   const [cargaEx, setCargaEx] = useState('');
+  const [padroesOriginaisEx, setPadroesOriginaisEx] = useState({ repeticoes: '', carga: '' });
   
   // Estados para série individual
   const [serieNumero, setSerieNumero] = useState('');
   const [serieReps, setSerieReps] = useState('');
   const [serieCarga, setSerieCarga] = useState('');
-  const [serieData, setSerieData] = useState(new Date());
   
   const [idExSendoEditado, setIdExSendoEditado] = useState(null);
   const [idCicloSendoEditado, setIdCicloSendoEditado] = useState(null);
   const [idTreinoSendoEditado, setIdTreinoSendoEditado] = useState(null);
 
-  // Carrega dados ao iniciar - garantido
+  const cicloSelecionado = ciclos.find(c => c.id === cicloSelecionadoId) || null;
+  const treinoSelecionado = cicloSelecionado?.treinos.find(t => t.id === treinoSelecionadoId) || null;
+
   useEffect(() => { 
     carregarDados(); 
   }, []);
 
   const carregarDados = async () => {
+    setCarregando(true);
     try {
       const valor = await AsyncStorage.getItem(STORAGE_KEY);
-      if (valor !== null) {
-        setCiclos(JSON.parse(valor));
-      } else {
-        setCiclos([]);
-      }
+      const dados = valor !== null ? normalizarCiclos(JSON.parse(valor)) : [];
+      ciclosRef.current = dados;
+      setCiclos(dados);
+      setErroCarregamento(false);
+      gravacaoBloqueada.current = false;
     } catch (e) { 
-      Alert.alert("Erro", "Não foi possível carregar os dados."); 
+      // Não liberar gravação: salvar agora substituiria os dados que não conseguimos ler.
+      gravacaoBloqueada.current = true;
+      setErroCarregamento(true);
       console.log(e);
+    } finally {
+      setCarregando(false);
     }
   };
 
-  const salvarDados = async (novosCiclos) => {
-    try {
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(novosCiclos));
-      setCiclos(novosCiclos);
-    } catch (e) { 
-      Alert.alert("Erro", "Não foi possível salvar os dados."); 
-      console.log(e); 
+  const atualizarCiclos = (transformar) => {
+    if (gravacaoBloqueada.current) {
+      avisar("Erro", "Os dados salvos não foram carregados. Tente carregar novamente antes de fazer alterações.");
+      return;
     }
+    const novosCiclos = transformar(ciclosRef.current);
+    ciclosRef.current = novosCiclos;
+    setCiclos(novosCiclos);
+
+    const json = JSON.stringify(novosCiclos);
+    filaGravacao.current = filaGravacao.current
+      .then(() => AsyncStorage.setItem(STORAGE_KEY, json))
+      .catch((e) => {
+        console.log(e);
+        avisar("Erro", "Não foi possível salvar os dados.");
+      });
   };
 
-  const formatarData = (data) => new Date(data).toLocaleDateString('pt-BR');
-  const formatarDataHora = (data) => new Date(data).toLocaleDateString('pt-BR') + ' ' + new Date(data).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-  const obterDataValida = (data) => (!data || isNaN(new Date(data).getTime())) ? new Date() : new Date(data);
+  const atualizarCiclo = (cicloId, transformar) =>
+    atualizarCiclos(lista => lista.map(c => (c.id === cicloId ? transformar(c) : c)));
 
-  const calcularTotalTreinos = (inicio, fim, freq) => {
-    const data1 = new Date(inicio);
-    const data2 = new Date(fim);
-    data1.setHours(0,0,0,0);
-    data2.setHours(0,0,0,0);
-    
-    const diffTime = Math.abs(data2 - data1);
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
-    const semanas = diffDays / 7;
-    const totalTreinos = Math.ceil(semanas * freq);
-    
-    return Math.max(totalTreinos, 1);
+  const atualizarTreino = (cicloId, treinoId, transformar) =>
+    atualizarCiclo(cicloId, c => ({
+      ...c,
+      treinos: c.treinos.map(t => (t.id === treinoId ? transformar(t) : t))
+    }));
+
+  const atualizarExercicio = (cicloId, treinoId, exercicioId, transformar) =>
+    atualizarTreino(cicloId, treinoId, t => ({
+      ...t,
+      exercicios: t.exercicios.map(ex => (ex.id === exercicioId ? transformar(ex) : ex))
+    }));
+
+  const aplicarData = (modo, data) => {
+    const novaData = inicioDoDia(data);
+    if (modo === 'inicio') {
+      setDataInicio(novaData);
+      setDataFim(fimAtual => (novaData > fimAtual ? novaData : fimAtual));
+    } else {
+      setDataFim(novaData);
+    }
   };
 
   const onDateChange = (event, selectedDate) => {
-    const currentDate = selectedDate || (datePickerMode === 'inicio' ? dataInicio : dataFim);
-    setShowDatePicker(Platform.OS === 'ios');
-    if (datePickerMode === 'inicio') {
-        const novaDataInicio = obterDataValida(currentDate);
-        setDataInicio(novaDataInicio);
-        if (novaDataInicio > dataFim) setDataFim(novaDataInicio);
-    } else {
-        setDataFim(obterDataValida(currentDate));
-    }
+    if (Platform.OS !== 'ios') setShowDatePicker(false);
+    if (event?.type === 'dismissed' || !selectedDate) return;
+    aplicarData(datePickerMode, selectedDate);
+  };
+
+  const abrirSeletorData = (modo) => {
+    setDatePickerMode(modo);
+    setShowDatePicker(true);
+  };
+
+  const abrirNovoCiclo = () => {
+    fecharModalCiclo();
+    setModalCicloVisible(true);
+  };
+
+  const abrirEdicaoCiclo = (ciclo) => {
+    setIdCicloSendoEditado(ciclo.id);
+    setNomeCiclo(ciclo.nome);
+    setDataInicio(inicioDoDia(ciclo.dataInicio));
+    setDataFim(inicioDoDia(ciclo.dataFim));
+    setTreinosPorSemana(String(ciclo.frequenciaSemanal || ''));
+    setShowDatePicker(false);
+    setModalCicloVisible(true);
   };
 
   const salvarCiclo = () => {
-    const freqInt = parseInt(treinosPorSemana);
-    if (!nomeCiclo.trim() || isNaN(freqInt) || freqInt <= 0 || freqInt > 7) {
-        Alert.alert("Erro", "Preencha o nome e um número válido de treinos por semana (1 a 7).");
-        return;
-    }
-    
-    if (dataFim < dataInicio) {
-      Alert.alert("Erro", "Data final não pode ser menor que a data inicial.");
+    const nome = nomeCiclo.trim();
+    const freqTexto = treinosPorSemana.trim();
+    if (!nome) {
+      avisar("Erro", "Informe o nome do ciclo.");
       return;
     }
-    
-    const metaTotal = calcularTotalTreinos(dataInicio, dataFim, freqInt);
-    
+    if (!ehInteiroPositivo(freqTexto) || Number(freqTexto) > 7) {
+      avisar("Erro", "Treinos por semana deve ser um número inteiro de 1 a 7.");
+      return;
+    }
+
+    const inicio = inicioDoDia(dataInicio);
+    const fim = inicioDoDia(dataFim);
+    if (fim < inicio) {
+      avisar("Erro", "A data final não pode ser anterior à data inicial.");
+      return;
+    }
+
+    const freqInt = Number(freqTexto);
+    const dadosCiclo = {
+      nome,
+      dataInicio: inicio.toISOString(),
+      dataFim: fim.toISOString(),
+      metaTotal: calcularTotalTreinos(inicio, fim, freqInt),
+      frequenciaSemanal: freqInt,
+    };
+
     if (idCicloSendoEditado) {
-        const ciclosAtualizados = ciclos.map(c => {
-            if (c.id === idCicloSendoEditado) {
-                return {
-                    ...c,
-                    nome: nomeCiclo,
-                    dataInicio: dataInicio.toISOString(),
-                    dataFim: dataFim.toISOString(),
-                    metaTotal: metaTotal,
-                    frequenciaSemanal: freqInt,
-                };
-            }
-            return c;
-        });
-        salvarDados(ciclosAtualizados);
+      atualizarCiclo(idCicloSendoEditado, c => ({ ...c, ...dadosCiclo }));
     } else {
-        const novoCiclo = {
-            id: Date.now().toString(),
-            nome: nomeCiclo,
-            dataInicio: dataInicio.toISOString(),
-            dataFim: dataFim.toISOString(),
-            metaTotal: metaTotal,
-            frequenciaSemanal: freqInt,
-            treinos: [] 
-        };
-        salvarDados([...ciclos, novoCiclo]);
+      atualizarCiclos(lista => [...lista, { id: gerarId(), ...dadosCiclo, treinos: [] }]);
     }
     
     fecharModalCiclo();
   };
 
   const deletarCiclo = (id) => {
-    Alert.alert("Excluir Ciclo", "Deseja remover este ciclo e todos os seus treinos?", [
-        { text: "Cancelar", style: "cancel" },
-        { text: "Excluir", onPress: () => salvarDados(ciclos.filter(c => c.id !== id)), style: "destructive" }
-    ]);
+    confirmar("Excluir Ciclo", "Deseja remover este ciclo e todos os seus treinos?", "Excluir", () => {
+      atualizarCiclos(lista => lista.filter(c => c.id !== id));
+      if (cicloSelecionadoId === id) {
+        setCicloSelecionadoId(null);
+        setTreinoSelecionadoId(null);
+      }
+    });
   };
 
   const copiarCiclo = (cicloParaCopiar) => {
-    // Deep copy the cycle and reset all IDs to create a new cycle
+    // A cópia começa hoje e mantém a duração do ciclo original.
+    const duracaoDias = Math.max(0, Math.round(
+      (inicioDoDia(cicloParaCopiar.dataFim) - inicioDoDia(cicloParaCopiar.dataInicio)) / DIA_MS
+    ));
+    const inicio = inicioDoDia(new Date());
+    const fim = new Date(inicio);
+    fim.setDate(fim.getDate() + duracaoDias);
+
     const novoCiclo = {
       ...cicloParaCopiar,
-      id: Date.now().toString(),
+      id: gerarId(),
       nome: `${cicloParaCopiar.nome} (Cópia)`,
-      dataInicio: new Date().toISOString(), // Start from today
-      dataFim: new Date(new Date().setDate(new Date().getDate() + 30)).toISOString(), // Default to 30 days
-      metaTotal: cicloParaCopiar.metaTotal,
-      frequenciaSemanal: cicloParaCopiar.frequenciaSemanal,
-      treinos: cicloParaCopiar.treinos.map(treino => ({
-        ...treino,
-        id: `${Date.now()}_${Math.random()}`,
-        datasExecucao: [], // Reset execution dates for the new cycle
-        dataCriacao: new Date().toISOString(),
-        exercicios: treino.exercicios.map(exercicio => ({
-          ...exercicio,
-          id: `${Date.now()}_${Math.random()}`,
-          series: exercicio.series.map(serie => ({
-            ...serie,
-            id: `${Date.now()}_${Math.random()}`,
-            dataRegistro: new Date().toISOString()
-          }))
-        }))
-      }))
+      dataInicio: inicio.toISOString(),
+      dataFim: fim.toISOString(),
+      metaTotal: calcularTotalTreinos(inicio, fim, cicloParaCopiar.frequenciaSemanal),
+      treinos: cicloParaCopiar.treinos.map(clonarTreino)
     };
     
-    salvarDados([...ciclos, novoCiclo]);
+    atualizarCiclos(lista => [...lista, novoCiclo]);
   };
 
   const salvarTreino = () => {
-    if (!nomeTreino.trim() || !cicloSelecionado) {
-      Alert.alert("Erro", "Nome do treino é obrigatório");
+    const nome = nomeTreino.trim();
+    if (!nome || !cicloSelecionadoId) {
+      avisar("Erro", "Nome do treino é obrigatório.");
       return;
     }
     
-    let listaAtualizada;
-    
     if (idTreinoSendoEditado) {
-        const treinosAtualizados = cicloSelecionado.treinos.map(t => 
-            t.id === idTreinoSendoEditado ? {...t, nome: nomeTreino} : t
-        );
-        const cicloAtualizado = { ...cicloSelecionado, treinos: treinosAtualizados };
-        listaAtualizada = ciclos.map(c => c.id === cicloSelecionado.id ? cicloAtualizado : c);
-        
-        setCicloSelecionado(cicloAtualizado);
-        
-        if (treinoSelecionado && treinoSelecionado.id === idTreinoSendoEditado) {
-          setTreinoSelecionado({...treinoSelecionado, nome: nomeTreino});
-        }
+      atualizarTreino(cicloSelecionadoId, idTreinoSendoEditado, t => ({ ...t, nome }));
     } else {
-        const novoTreino = {
-            id: Date.now().toString(),
-            nome: nomeTreino,
-            dataCriacao: new Date().toISOString(),
-            datasExecucao: [],
-            exercicios: []
-        };
-        const cicloAtualizado = { ...cicloSelecionado, treinos: [...cicloSelecionado.treinos, novoTreino] };
-        listaAtualizada = ciclos.map(c => c.id === cicloSelecionado.id ? cicloAtualizado : c);
-        
-        setCicloSelecionado(cicloAtualizado);
+      const novoTreino = {
+        id: gerarId(),
+        nome,
+        dataCriacao: new Date().toISOString(),
+        datasExecucao: [],
+        exercicios: []
+      };
+      atualizarCiclo(cicloSelecionadoId, c => ({ ...c, treinos: [...c.treinos, novoTreino] }));
     }
 
-    salvarDados(listaAtualizada);
     fecharModalTreino();
   };
 
   const deletarTreino = (treinoId) => {
-    Alert.alert("Excluir Treino", "Deseja remover este treino e todos os seus exercícios?", [
-        { text: "Cancelar", style: "cancel" },
-        { text: "Excluir", onPress: () => {
-            const treinosAtualizados = cicloSelecionado.treinos.filter(t => t.id !== treinoId);
-            const cicloAtualizado = { ...cicloSelecionado, treinos: treinosAtualizados };
-            const listaAtualizada = ciclos.map(c => c.id === cicloSelecionado.id ? cicloAtualizado : c);
-            
-            salvarDados(listaAtualizada);
-            setCicloSelecionado(cicloAtualizado);
-            
-            if (treinoSelecionado && treinoSelecionado.id === treinoId) {
-              setTreinoSelecionado(null);
-            }
-        }, style: "destructive" }
-    ]);
+    const cicloId = cicloSelecionadoId;
+    confirmar("Excluir Treino", "Deseja remover este treino e todos os seus exercícios?", "Excluir", () => {
+      atualizarCiclo(cicloId, c => ({ ...c, treinos: c.treinos.filter(t => t.id !== treinoId) }));
+      if (treinoSelecionadoId === treinoId) setTreinoSelecionadoId(null);
+    });
   };
 
   const copiarTreino = (treinoParaCopiar) => {
-    const novoTreino = {
-        ...treinoParaCopiar,
-        id: Date.now().toString(),
-        nome: `${treinoParaCopiar.nome} (Cópia)`,
-        datasExecucao: [],
-        dataCriacao: new Date().toISOString()
-    };
-    const cicloAtualizado = { ...cicloSelecionado, treinos: [...cicloSelecionado.treinos, novoTreino] };
-    const listaAtualizada = ciclos.map(c => c.id === cicloSelecionado.id ? cicloAtualizado : c);
-    
-    salvarDados(listaAtualizada);
-    setCicloSelecionado(cicloAtualizado);
+    const novoTreino = { ...clonarTreino(treinoParaCopiar), nome: `${treinoParaCopiar.nome} (Cópia)` };
+    atualizarCiclo(cicloSelecionadoId, c => ({ ...c, treinos: [...c.treinos, novoTreino] }));
   };
 
   const moverTreino = (index, direcao) => {
-    if (!cicloSelecionado) return;
-    
-    const novosTreinos = [...cicloSelecionado.treinos];
-    const novoIndex = direcao === 'up' ? index - 1 : index + 1;
-    
-    if (novoIndex < 0 || novoIndex >= novosTreinos.length) return;
-    
-    [novosTreinos[index], novosTreinos[novoIndex]] = [novosTreinos[novoIndex], novosTreinos[index]];
-    
-    const cicloAtualizado = { ...cicloSelecionado, treinos: novosTreinos };
-    const listaAtualizada = ciclos.map(c => c.id === cicloSelecionado.id ? cicloAtualizado : c);
-    
-    salvarDados(listaAtualizada);
-    setCicloSelecionado(cicloAtualizado);
+    if (!cicloSelecionadoId) return;
+    atualizarCiclo(cicloSelecionadoId, c => {
+      const novosTreinos = [...c.treinos];
+      const novoIndex = direcao === 'up' ? index - 1 : index + 1;
+      if (novoIndex < 0 || novoIndex >= novosTreinos.length) return c;
+      [novosTreinos[index], novosTreinos[novoIndex]] = [novosTreinos[novoIndex], novosTreinos[index]];
+      return { ...c, treinos: novosTreinos };
+    });
   };
 
   const foiFeitoHoje = (treino) => {
     if (!treino.datasExecucao || treino.datasExecucao.length === 0) return false;
-    
     const hoje = new Date().toDateString();
     return treino.datasExecucao.some(data => new Date(data).toDateString() === hoje);
   };
@@ -309,212 +469,175 @@ export default function App() {
   };
 
   const alternarExecucaoTreino = (treinoId) => {
-    const hoje = new Date().toISOString();
-    
-    const treinosAtualizados = cicloSelecionado.treinos.map(t => {
-      if (t.id === treinoId) {
-        const jaFoiHoje = foiFeitoHoje(t);
-        
-        if (jaFoiHoje) {
-          return {
-            ...t,
-            datasExecucao: t.datasExecucao.filter(data => 
-              new Date(data).toDateString() !== new Date().toDateString()
-            )
-          };
-        } else {
-          return {
-            ...t,
-            datasExecucao: [...(t.datasExecucao || []), hoje]
-          };
-        }
+    if (!cicloSelecionadoId) return;
+    atualizarTreino(cicloSelecionadoId, treinoId, t => {
+      const hoje = new Date().toDateString();
+      if (foiFeitoHoje(t)) {
+        return { ...t, datasExecucao: t.datasExecucao.filter(data => new Date(data).toDateString() !== hoje) };
       }
-      return t;
+      return { ...t, datasExecucao: [...(t.datasExecucao || []), new Date().toISOString()] };
     });
+  };
 
-    const cicloAtualizado = { ...cicloSelecionado, treinos: treinosAtualizados };
-    const listaAtualizada = ciclos.map(c => c.id === cicloSelecionado.id ? cicloAtualizado : c);
-    
-    salvarDados(listaAtualizada);
-    setCicloSelecionado(cicloAtualizado);
-    
-    if (treinoSelecionado && treinoSelecionado.id === treinoId) {
-      const treinoAtualizado = treinosAtualizados.find(t => t.id === treinoId);
-      setTreinoSelecionado(treinoAtualizado);
-    }
+  const abrirNovoExercicio = () => {
+    fecharModalExercicio();
+    setModalExercicioVisible(true);
+  };
+
+  const abrirEdicaoExercicio = (exercicio) => {
+    const primeiraSerie = exercicio.series[0];
+    const repsPadrao = primeiraSerie ? primeiraSerie.repeticoes : '';
+    const cargaPadrao = primeiraSerie ? primeiraSerie.carga : '';
+    setIdExSendoEditado(exercicio.id);
+    setNomeEx(exercicio.nome);
+    setSeriesEx(String(exercicio.series.length));
+    setRepsEx(repsPadrao);
+    setCargaEx(cargaPadrao);
+    setPadroesOriginaisEx({ repeticoes: repsPadrao, carga: cargaPadrao });
+    setTempoEx(exercicio.tempo || '');
+    setVelocidadeEx(exercicio.velocidade || '');
+    setHorarioEx(exercicio.horario || '');
+    setModalExercicioVisible(true);
   };
 
   const salvarExercicio = () => {
-    if (!nomeEx.trim()) {
-      Alert.alert("Erro", "Nome do exercício é obrigatório");
+    const nome = nomeEx.trim();
+    if (!nome) {
+      avisar("Erro", "Nome do exercício é obrigatório.");
       return;
     }
-    
-    if (!treinoSelecionado) return;
-    
-    // Criar estrutura de séries baseada no input
-    const series = [];
-    const numSeries = parseInt(seriesEx) || 0;
-    const repsPadrao = repsEx;
-    const cargaPadrao = cargaEx;
-    
-    for (let i = 1; i <= numSeries; i++) {
-      series.push({
-        id: `${Date.now()}_${i}`,
-        numero: i,
-        repeticoes: repsPadrao,
-        carga: cargaPadrao,
-        // Removido o campo 'realizado'
-        dataRegistro: new Date().toISOString()
-      });
+    if (!cicloSelecionadoId || !treinoSelecionadoId) return;
+
+    const seriesTexto = seriesEx.trim();
+    const numSeries = seriesTexto === '' ? 0 : Number(seriesTexto);
+    if (!/^\d*$/.test(seriesTexto) || numSeries > MAX_SERIES) {
+      avisar("Erro", `Número de séries deve ser um número inteiro de 0 a ${MAX_SERIES}.`);
+      return;
     }
-    
-    const exData = {
-      id: idExSendoEditado || Date.now().toString(),
-      nome: nomeEx,
-      tempo: tempoEx,
-      velocidade: velocidadeEx,
-      horario: horarioEx,
-      series: series,
+
+    const repeticoes = repsEx.trim();
+    if (repeticoes !== '' && !ehInteiroPositivo(repeticoes)) {
+      avisar("Erro", "Repetições padrão deve ser um número inteiro maior que zero.");
+      return;
+    }
+    const carga = cargaEx.trim();
+    const agora = new Date().toISOString();
+    const criarSerie = (numero) => ({ id: gerarId(), numero, repeticoes, carga, dataRegistro: agora });
+
+    const camposExercicio = {
+      nome,
+      tempo: tempoEx.trim(),
+      velocidade: velocidadeEx.trim(),
+      horario: horarioEx.trim(),
     };
-    
-    let novoTreinoSelecionado = {...treinoSelecionado};
 
     if (idExSendoEditado) {
-      novoTreinoSelecionado.exercicios = treinoSelecionado.exercicios.map(ex => ex.id === idExSendoEditado ? exData : ex);
+      const mudouReps = repeticoes !== padroesOriginaisEx.repeticoes;
+      const mudouCarga = carga !== padroesOriginaisEx.carga;
+      atualizarExercicio(cicloSelecionadoId, treinoSelecionadoId, idExSendoEditado, ex => {
+        // Séries ajustadas individualmente mantêm seus valores; só as que seguiam o padrão antigo recebem o novo.
+        const seriesMantidas = ex.series.slice(0, numSeries).map(serie => ({
+          ...serie,
+          repeticoes: mudouReps && serie.repeticoes === padroesOriginaisEx.repeticoes ? repeticoes : serie.repeticoes,
+          carga: mudouCarga && serie.carga === padroesOriginaisEx.carga ? carga : serie.carga,
+        }));
+        const seriesNovas = [];
+        for (let i = seriesMantidas.length + 1; i <= numSeries; i++) seriesNovas.push(criarSerie(i));
+        return { ...ex, ...camposExercicio, series: renumerarSeries([...seriesMantidas, ...seriesNovas]) };
+      });
     } else {
-      novoTreinoSelecionado.exercicios = [...treinoSelecionado.exercicios, exData];
+      const novoExercicio = {
+        id: gerarId(),
+        ...camposExercicio,
+        series: Array.from({ length: numSeries }, (_, i) => criarSerie(i + 1)),
+      };
+      atualizarTreino(cicloSelecionadoId, treinoSelecionadoId, t => ({
+        ...t,
+        exercicios: [...t.exercicios, novoExercicio]
+      }));
     }
 
-    const treinosAtualizados = cicloSelecionado.treinos.map(t => {
-      if(t.id === novoTreinoSelecionado.id) return novoTreinoSelecionado;
-      return t;
-    });
-
-    const cicloAtualizado = { ...cicloSelecionado, treinos: treinosAtualizados };
-    const listaAtualizada = ciclos.map(c => c.id === cicloSelecionado.id ? cicloAtualizado : c);
-    
-    salvarDados(listaAtualizada);
-    setCicloSelecionado(cicloAtualizado);
-    setTreinoSelecionado(novoTreinoSelecionado);
     fecharModalExercicio();
   };
 
   const salvarSerie = () => {
-    if (!exercicioSelecionado || !treinoSelecionado) return;
+    if (!cicloSelecionadoId || !treinoSelecionadoId || !exercicioSelecionadoId) return;
     
-    const repeticoesInt = parseInt(serieReps) || 0;
-    
-    if (repeticoesInt <= 0) {
-      Alert.alert("Erro", "Número de repetições deve ser maior que zero");
+    const repeticoes = serieReps.trim();
+    if (!ehInteiroPositivo(repeticoes)) {
+      avisar("Erro", "Número de repetições deve ser um número inteiro maior que zero.");
       return;
     }
-    
-    // Encontrar o exercício atual
-    const exercicioAtual = treinoSelecionado.exercicios.find(ex => ex.id === exercicioSelecionado.id);
-    if (!exercicioAtual) return;
-    
-    let seriesAtualizadas;
-    
-    if (serieSendoEditada) {
-      // Editar série existente
-      seriesAtualizadas = exercicioAtual.series.map(s => 
-        s.id === serieSendoEditada.id 
-          ? { 
-              ...s, 
-              repeticoes: serieReps,
-              carga: serieCarga,
-              dataRegistro: new Date().toISOString()
-            } 
-          : s
-      );
-    } else {
-      // Adicionar nova série
-      const novaSerie = {
-        id: Date.now().toString(),
-        numero: exercicioAtual.series.length + 1,
-        repeticoes: serieReps,
-        carga: serieCarga,
-        dataRegistro: new Date().toISOString()
-      };
-      seriesAtualizadas = [...exercicioAtual.series, novaSerie];
+    const carga = serieCarga.trim();
+    const agora = new Date().toISOString();
+
+    if (!serieSendoEditadaId) {
+      const exercicioAtual = treinoSelecionado?.exercicios.find(ex => ex.id === exercicioSelecionadoId);
+      if (exercicioAtual && exercicioAtual.series.length >= MAX_SERIES) {
+        avisar("Erro", `Cada exercício pode ter no máximo ${MAX_SERIES} séries.`);
+        return;
+      }
     }
-    
-    // Atualizar o exercício
-    const exercicioAtualizado = { ...exercicioAtual, series: seriesAtualizadas };
-    
-    // Atualizar o treino
-    const exerciciosAtualizados = treinoSelecionado.exercicios.map(ex => 
-      ex.id === exercicioSelecionado.id ? exercicioAtualizado : ex
-    );
-    
-    atualizarTreinoNoStorage(exerciciosAtualizados);
+
+    atualizarExercicio(cicloSelecionadoId, treinoSelecionadoId, exercicioSelecionadoId, ex => {
+      if (serieSendoEditadaId) {
+        return {
+          ...ex,
+          series: ex.series.map(s => (s.id === serieSendoEditadaId ? { ...s, repeticoes, carga, dataRegistro: agora } : s))
+        };
+      }
+      const novaSerie = { id: gerarId(), numero: ex.series.length + 1, repeticoes, carga, dataRegistro: agora };
+      return { ...ex, series: [...ex.series, novaSerie] };
+    });
+
     fecharModalSerie();
   };
 
   const moverExercicio = (index, direcao) => {
-    const novosExercicios = [...treinoSelecionado.exercicios];
-    const novoIndex = direcao === 'up' ? index - 1 : index + 1;
-    if (novoIndex < 0 || novoIndex >= novosExercicios.length) return;
-    [novosExercicios[index], novosExercicios[novoIndex]] = [novosExercicios[novoIndex], novosExercicios[index]];
-    atualizarTreinoNoStorage(novosExercicios);
-  };
-
-  const atualizarTreinoNoStorage = (novaListaExercicios) => {
-    const novoTreinoSelecionado = {...treinoSelecionado, exercicios: novaListaExercicios};
-    const treinosAtualizados = cicloSelecionado.treinos.map(t => {
-        if(t.id === novoTreinoSelecionado.id) return novoTreinoSelecionado;
-        return t;
+    if (!cicloSelecionadoId || !treinoSelecionadoId) return;
+    atualizarTreino(cicloSelecionadoId, treinoSelecionadoId, t => {
+      const novosExercicios = [...t.exercicios];
+      const novoIndex = direcao === 'up' ? index - 1 : index + 1;
+      if (novoIndex < 0 || novoIndex >= novosExercicios.length) return t;
+      [novosExercicios[index], novosExercicios[novoIndex]] = [novosExercicios[novoIndex], novosExercicios[index]];
+      return { ...t, exercicios: novosExercicios };
     });
-    const cicloAtualizado = { ...cicloSelecionado, treinos: treinosAtualizados };
-    const listaAtualizada = ciclos.map(c => c.id === cicloSelecionado.id ? cicloAtualizado : c);
-    
-    salvarDados(listaAtualizada);
-    setCicloSelecionado(cicloAtualizado);
-    setTreinoSelecionado(novoTreinoSelecionado);
   };
 
   const deletarExercicio = (exId) => {
-    Alert.alert("Excluir Exercício", "Remover este exercício?", [
-        { text: "Cancelar", style: "cancel" },
-        { text: "Excluir", onPress: () => {
-            const exerciciosAtualizados = treinoSelecionado.exercicios.filter(ex => ex.id !== exId);
-            atualizarTreinoNoStorage(exerciciosAtualizados);
-            
-            // Limpar o estado de expansão para este exercício
-            const newExpandidos = {...exerciciosExpandidos};
-            delete newExpandidos[exId];
-            setExerciciosExpandidos(newExpandidos);
-        }, style: "destructive" }
-    ]);
+    const cicloId = cicloSelecionadoId;
+    const treinoId = treinoSelecionadoId;
+    confirmar("Excluir Exercício", "Remover este exercício?", "Excluir", () => {
+      atualizarTreino(cicloId, treinoId, t => ({ ...t, exercicios: t.exercicios.filter(ex => ex.id !== exId) }));
+      setExerciciosExpandidos(prev => {
+        const novo = { ...prev };
+        delete novo[exId];
+        return novo;
+      });
+    });
   };
 
   const deletarSerie = (exercicio, serieId) => {
-    Alert.alert("Remover Série", "Deseja remover esta série?", [
-      { text: "Cancelar", style: "cancel" },
-      { text: "Remover", onPress: () => {
-          const seriesAtualizadas = exercicio.series.filter(s => s.id !== serieId);
-          const exercicioAtualizado = { ...exercicio, series: seriesAtualizadas };
-          const exerciciosAtualizados = treinoSelecionado.exercicios.map(ex => 
-            ex.id === exercicio.id ? exercicioAtualizado : ex
-          );
-          atualizarTreinoNoStorage(exerciciosAtualizados);
-        }, 
-        style: "destructive" 
-      }
-    ]);
+    const cicloId = cicloSelecionadoId;
+    const treinoId = treinoSelecionadoId;
+    confirmar("Remover Série", "Deseja remover esta série?", "Remover", () => {
+      atualizarExercicio(cicloId, treinoId, exercicio.id, ex => ({
+        ...ex,
+        series: renumerarSeries(ex.series.filter(s => s.id !== serieId))
+      }));
+    });
   };
 
-  const abrirModalSerie = (exercicio, serie = null) => {
-    setExercicioSelecionado(exercicio);
+  const abrirModalSerie = (exercicio, serie = null, indice = null) => {
+    setExercicioSelecionadoId(exercicio.id);
     if (serie) {
-      setSerieSendoEditada(serie);
-      setSerieNumero(serie.numero.toString());
-      setSerieReps(serie.repeticoes.toString());
-      setSerieCarga(serie.carga || '');
+      setSerieSendoEditadaId(serie.id);
+      setSerieNumero(String(indice + 1));
+      setSerieReps(serie.repeticoes);
+      setSerieCarga(serie.carga);
     } else {
-      setSerieSendoEditada(null);
-      setSerieNumero('');
+      setSerieSendoEditadaId(null);
+      setSerieNumero(String(exercicio.series.length + 1));
       setSerieReps('');
       setSerieCarga('');
     }
@@ -523,10 +646,11 @@ export default function App() {
 
   const fecharModalCiclo = () => { 
     setNomeCiclo(''); 
-    setDataInicio(new Date()); 
-    setDataFim(new Date()); 
+    setDataInicio(inicioDoDia(new Date())); 
+    setDataFim(inicioDoDia(new Date())); 
     setTreinosPorSemana(''); 
     setIdCicloSendoEditado(null); 
+    setShowDatePicker(false);
     setModalCicloVisible(false); 
   };
   
@@ -544,17 +668,28 @@ export default function App() {
     setVelocidadeEx(''); 
     setHorarioEx(''); 
     setCargaEx('');
+    setPadroesOriginaisEx({ repeticoes: '', carga: '' });
     setIdExSendoEditado(null); 
     setModalExercicioVisible(false); 
   };
 
   const fecharModalSerie = () => {
-    setExercicioSelecionado(null);
-    setSerieSendoEditada(null);
+    setExercicioSelecionadoId(null);
+    setSerieSendoEditadaId(null);
     setSerieNumero('');
     setSerieReps('');
     setSerieCarga('');
     setModalSerieVisible(false);
+  };
+
+  const fecharDetalheCiclo = () => {
+    setTreinoSelecionadoId(null);
+    setCicloSelecionadoId(null);
+  };
+
+  const fecharDetalheTreino = () => {
+    setTreinoSelecionadoId(null);
+    setExerciciosExpandidos({});
   };
 
   const formatarDetalhesExercicio = (item) => {
@@ -573,91 +708,115 @@ export default function App() {
     }));
   };
 
-  const ActionButton = ({ icon, color, onPress, label }) => (
-    <TouchableOpacity style={styles.actionButton} onPress={onPress}>
-      <Ionicons name={icon} size={18} color={color} />
-      {label && <Text style={[styles.actionButtonText, { color }]}>{label}</Text>}
-    </TouchableOpacity>
-  );
+  const renderEstadoInicial = () => {
+    if (carregando) {
+      return (
+        <View style={styles.emptyContainer}>
+          <ActivityIndicator size="large" color={COLORS.primary} />
+          <Text style={styles.emptySubText}>Carregando seus ciclos...</Text>
+        </View>
+      );
+    }
+    if (erroCarregamento) {
+      return (
+        <View style={styles.emptyContainer}>
+          <Ionicons name="alert-circle-outline" size={60} color={COLORS.danger} />
+          <Text style={styles.emptyText}>Não foi possível carregar os dados</Text>
+          <Text style={styles.emptySubText}>Seus dados não foram alterados.</Text>
+          <TouchableOpacity style={styles.btnTentarNovamente} onPress={carregarDados} accessibilityRole="button">
+            <Text style={styles.modalButtonTexto}>Tentar novamente</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+    return (
+      <View style={styles.emptyContainer}>
+        <Ionicons name="fitness-outline" size={60} color={COLORS.textSecondary} />
+        <Text style={styles.emptyText}>Nenhum ciclo criado ainda</Text>
+        <Text style={styles.emptySubText}>Toque no botão + para começar</Text>
+      </View>
+    );
+  };
+
+  const podeEditar = !carregando && !erroCarregamento;
 
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={COLORS.background} />
       <Text style={styles.header}>Meus Ciclos</Text>
       <FlatList
-        data={ciclos}
+        data={podeEditar ? ciclos : []}
         keyExtractor={item => item.id}
         contentContainerStyle={styles.flatListContent}
         showsVerticalScrollIndicator={false}
-        ListEmptyComponent={() => (
-          <View style={styles.emptyContainer}>
-            <Ionicons name="fitness-outline" size={60} color={COLORS.textSecondary} />
-            <Text style={styles.emptyText}>Nenhum ciclo criado ainda</Text>
-            <Text style={styles.emptySubText}>Toque no botão + para começar</Text>
-          </View>
-        )}
+        ListEmptyComponent={renderEstadoInicial}
         renderItem={({ item }) => {
-          const listaTreinos = item.treinos || [];
-          const totalExecucoes = listaTreinos.reduce((acc, treino) => 
-            acc + (treino.datasExecucao ? treino.datasExecucao.length : 0), 0
-          );
+          const totalExecucoes = item.treinos.reduce((acc, treino) => acc + contarExecucoes(treino), 0);
           const metaTotal = item.metaTotal || 1;
-          const progresso = metaTotal > 0 ? (totalExecucoes / metaTotal) * 100 : 0;
+          const progresso = (totalExecucoes / metaTotal) * 100;
           
           return (
             <View style={styles.cardCiclo}>
-              <TouchableOpacity onPress={() => setCicloSelecionado(item)} style={{flex: 1}}>
                 <View style={styles.row}>
-                  <View style={{flex: 1}}>
-                    <Text style={styles.tituloCiclo}>{item.nome}</Text>
+                  <TouchableOpacity
+                    onPress={() => setCicloSelecionadoId(item.id)}
+                    style={{flex: 1}}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Abrir ciclo ${item.nome}`}>
+                    <Text style={styles.tituloCiclo} numberOfLines={2}>{item.nome}</Text>
                     <Text style={styles.textoData}>{formatarData(item.dataInicio)} - {formatarData(item.dataFim)}</Text>
-                  </View>
+                  </TouchableOpacity>
                   <View style={styles.actionButtonsContainer}>
                     <ActionButton
                       icon="copy-outline"
                       color={COLORS.textSecondary}
+                      accessibilityLabel="Copiar ciclo"
                       onPress={() => copiarCiclo(item)}
                     />
                     <ActionButton
                       icon="pencil-outline"
                       color={COLORS.primary}
-                      onPress={() => {
-                        setIdCicloSendoEditado(item.id);
-                        setNomeCiclo(item.nome);
-                        setDataInicio(new Date(item.dataInicio));
-                        setDataFim(new Date(item.dataFim));
-                        setTreinosPorSemana(item.frequenciaSemanal.toString());
-                        setModalCicloVisible(true);
-                      }}
+                      accessibilityLabel="Editar ciclo"
+                      onPress={() => abrirEdicaoCiclo(item)}
                     />
                     <ActionButton
                       icon="trash-outline"
                       color={COLORS.danger}
+                      accessibilityLabel="Excluir ciclo"
                       onPress={() => deletarCiclo(item.id)}
                     />
                   </View>
                 </View>
-                <View style={styles.containerProgresso}>
-                  <View style={[styles.barraProgresso, { width: `${Math.min(progresso, 100)}%` }]} />
-                </View>
-                <Text style={styles.textoProgresso}>{totalExecucoes} / {metaTotal} treinos realizados ({item.frequenciaSemanal}x/sem)</Text>
-              </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => setCicloSelecionadoId(item.id)}
+                  accessible={false}>
+                  <View style={styles.containerProgresso}>
+                    <View style={[styles.barraProgresso, { width: `${Math.min(progresso, 100)}%` }]} />
+                  </View>
+                  <Text style={styles.textoProgresso}>{totalExecucoes} / {metaTotal} treinos realizados ({item.frequenciaSemanal}x/sem)</Text>
+                </TouchableOpacity>
             </View>
           );
         }}
       />
-      <TouchableOpacity style={styles.btnFlutuante} onPress={() => setModalCicloVisible(true)}>
-        <Ionicons name="add" size={32} color="white" />
-      </TouchableOpacity>
+      {podeEditar && (
+        <TouchableOpacity
+          style={styles.btnFlutuante}
+          onPress={abrirNovoCiclo}
+          accessibilityRole="button"
+          accessibilityLabel="Novo ciclo">
+          <Ionicons name="add" size={32} color={COLORS.onPrimary} />
+        </TouchableOpacity>
+      )}
 
       {/* MODAL DETALHE DO CICLO (LISTA DE TREINOS) */}
-      <Modal visible={!!cicloSelecionado} animationType="slide">
+      <Modal visible={!!cicloSelecionado} animationType="slide" onRequestClose={fecharDetalheCiclo}>
         <SafeAreaView style={styles.container}>
           <View style={styles.headerDetalhe}>
-            <TouchableOpacity onPress={() => setCicloSelecionado(null)}>
+            <TouchableOpacity onPress={fecharDetalheCiclo} accessibilityRole="button" accessibilityLabel="Voltar">
               <Ionicons name="arrow-back" size={28} color={COLORS.text} />
             </TouchableOpacity>
-            <Text style={styles.headerMenor}>{cicloSelecionado?.nome}</Text>
+            <Text style={styles.headerMenor} numberOfLines={1}>{cicloSelecionado?.nome}</Text>
             <View style={{width: 28}} />
           </View>
           <FlatList
@@ -665,13 +824,14 @@ export default function App() {
             keyExtractor={item => item.id}
             contentContainerStyle={styles.flatListContent}
             showsVerticalScrollIndicator={false}
-            ListHeaderComponent={() => (
+            ListHeaderComponent={
                 <View>
                     <Text style={styles.subHeaderDetalhe}>
                       {formatarData(cicloSelecionado?.dataInicio)} até {formatarData(cicloSelecionado?.dataFim)}
                     </Text>
                     <TouchableOpacity 
                       style={styles.btnAdicionar} 
+                      accessibilityRole="button"
                       onPress={() => {
                         setNomeTreino('');
                         setIdTreinoSendoEditado(null);
@@ -681,10 +841,14 @@ export default function App() {
                       <Text style={styles.textAdicionar}>Adicionar Treino</Text>
                     </TouchableOpacity>
                 </View>
-            )}
+            }
+            ListEmptyComponent={
+              <Text style={styles.listaVaziaTexto}>Nenhum treino neste ciclo ainda.</Text>
+            }
             renderItem={({ item, index }) => {
               const foiHoje = foiFeitoHoje(item);
               const totalExecucoes = contarExecucoes(item);
+              const ultimo = index === (cicloSelecionado.treinos.length - 1);
               
               return (
                 <View style={styles.cardTreinoContainer}>
@@ -692,45 +856,52 @@ export default function App() {
                     <TouchableOpacity 
                       onPress={() => moverTreino(index, 'up')} 
                       style={[styles.btnArrow, index === 0 && {opacity: 0.3}]} 
-                      disabled={index === 0}>
+                      disabled={index === 0}
+                      accessibilityRole="button"
+                      accessibilityLabel="Mover treino para cima">
                         <Ionicons name="chevron-up" size={20} color={COLORS.primary} />
                     </TouchableOpacity>
                     <TouchableOpacity 
                       onPress={() => moverTreino(index, 'down')} 
-                      style={[styles.btnArrow, index === (cicloSelecionado.treinos.length - 1) && {opacity: 0.3}]} 
-                      disabled={index === (cicloSelecionado.treinos.length - 1)}>
+                      style={[styles.btnArrow, ultimo && {opacity: 0.3}]} 
+                      disabled={ultimo}
+                      accessibilityRole="button"
+                      accessibilityLabel="Mover treino para baixo">
                         <Ionicons name="chevron-down" size={20} color={COLORS.primary} />
                     </TouchableOpacity>
                   </View>
 
-                  <TouchableOpacity 
-                    style={styles.cardContent} 
-                    onPress={() => {
-                      setTreinoSelecionado(item);
-                      // Resetar expansões quando abrir um novo treino
-                      setExerciciosExpandidos({});
-                    }}>
-                    <View style={{flex: 1}}>
-                      <View style={styles.row}>
-                        <View style={{flex: 1}}>
-                          <Text style={styles.nomeEx}>{item.nome}</Text>
-                          <Text style={styles.detalheEx}>
-                            {item.exercicios.length} Exercícios • {totalExecucoes}x realizado
-                          </Text>
-                        </View>
-                        <View style={styles.statusContainer}>
-                          <Text style={[styles.textoFinalizado, foiHoje && {color: COLORS.success}]}>
-                            {foiHoje ? "Feito hoje" : "Pendente"}
-                          </Text>
-                          <TouchableOpacity 
-                            style={[styles.checkbox, foiHoje && styles.checkboxChecked]} 
-                            onPress={() => alternarExecucaoTreino(item.id)}>
-                              {foiHoje && <Ionicons name="checkmark" size={20} color="white" />}
-                          </TouchableOpacity>
-                        </View>
+                  <View style={styles.cardContent}>
+                    <View style={styles.row}>
+                      <TouchableOpacity
+                        style={{flex: 1}}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Abrir treino ${item.nome}`}
+                        onPress={() => {
+                          setTreinoSelecionadoId(item.id);
+                          // Resetar expansões quando abrir um novo treino
+                          setExerciciosExpandidos({});
+                        }}>
+                        <Text style={styles.nomeEx} numberOfLines={2}>{item.nome}</Text>
+                        <Text style={styles.detalheEx}>
+                          {item.exercicios.length} Exercícios • {totalExecucoes}x realizado
+                        </Text>
+                      </TouchableOpacity>
+                      <View style={styles.statusContainer}>
+                        <Text style={[styles.textoFinalizado, foiHoje && {color: COLORS.success}]}>
+                          {foiHoje ? "Feito hoje" : "Pendente"}
+                        </Text>
+                        <TouchableOpacity 
+                          style={[styles.checkbox, foiHoje && styles.checkboxChecked]} 
+                          onPress={() => alternarExecucaoTreino(item.id)}
+                          accessibilityRole="checkbox"
+                          accessibilityState={{ checked: foiHoje }}
+                          accessibilityLabel={`Marcar ${item.nome} como feito hoje`}>
+                            {foiHoje && <Ionicons name="checkmark" size={20} color={COLORS.onPrimary} />}
+                        </TouchableOpacity>
                       </View>
                     </View>
-                  </TouchableOpacity>
+                  </View>
 
                   <View style={styles.actionButtonsRow}>
                     <ActionButton
@@ -764,16 +935,13 @@ export default function App() {
       </Modal>
 
       {/* MODAL DETALHE DO TREINO (LISTA DE EXERCÍCIOS) */}
-      <Modal visible={!!treinoSelecionado} animationType="slide">
+      <Modal visible={!!treinoSelecionado} animationType="slide" onRequestClose={fecharDetalheTreino}>
         <SafeAreaView style={styles.container}>
           <View style={styles.headerDetalhe}>
-            <TouchableOpacity onPress={() => {
-              setTreinoSelecionado(null);
-              setExerciciosExpandidos({});
-            }}>
+            <TouchableOpacity onPress={fecharDetalheTreino} accessibilityRole="button" accessibilityLabel="Voltar">
               <Ionicons name="arrow-back" size={28} color={COLORS.text} />
             </TouchableOpacity>
-            <Text style={styles.headerMenor}>{treinoSelecionado?.nome}</Text>
+            <Text style={styles.headerMenor} numberOfLines={1}>{treinoSelecionado?.nome}</Text>
             <View style={{width: 28}} />
           </View>
           
@@ -782,27 +950,22 @@ export default function App() {
             keyExtractor={item => item.id}
             contentContainerStyle={styles.flatListContent}
             showsVerticalScrollIndicator={false}
-            ListHeaderComponent={() => (
+            ListHeaderComponent={
               <TouchableOpacity 
                 style={styles.btnAdicionar} 
-                onPress={() => {
-                  setNomeEx('');
-                  setSeriesEx('');
-                  setRepsEx('');
-                  setTempoEx('');
-                  setVelocidadeEx('');
-                  setHorarioEx('');
-                  setCargaEx('');
-                  setIdExSendoEditado(null);
-                  setModalExercicioVisible(true);
-                }}>
+                accessibilityRole="button"
+                onPress={abrirNovoExercicio}>
                 <Ionicons name="add-circle-outline" size={24} color={COLORS.primary} />
                 <Text style={styles.textAdicionar}>Adicionar Exercício</Text>
               </TouchableOpacity>
-            )}
+            }
+            ListEmptyComponent={
+              <Text style={styles.listaVaziaTexto}>Nenhum exercício neste treino ainda.</Text>
+            }
             renderItem={({ item, index }) => {
-              const totalSeries = item.series ? item.series.length : 0;
+              const totalSeries = item.series.length;
               const estaExpandido = exerciciosExpandidos[item.id] || false;
+              const ultimo = index === (treinoSelecionado.exercicios.length - 1);
               
               return (
                 <View style={styles.cardExercicioContainer}>
@@ -810,13 +973,17 @@ export default function App() {
                     <TouchableOpacity 
                       onPress={() => moverExercicio(index, 'up')} 
                       style={[styles.btnArrow, index === 0 && {opacity: 0.3}]} 
-                      disabled={index === 0}>
+                      disabled={index === 0}
+                      accessibilityRole="button"
+                      accessibilityLabel="Mover exercício para cima">
                         <Ionicons name="chevron-up" size={20} color={COLORS.primary} />
                     </TouchableOpacity>
                     <TouchableOpacity 
                       onPress={() => moverExercicio(index, 'down')} 
-                      style={[styles.btnArrow, index === (treinoSelecionado.exercicios.length - 1) && {opacity: 0.3}]} 
-                      disabled={index === (treinoSelecionado.exercicios.length - 1)}>
+                      style={[styles.btnArrow, ultimo && {opacity: 0.3}]} 
+                      disabled={ultimo}
+                      accessibilityRole="button"
+                      accessibilityLabel="Mover exercício para baixo">
                         <Ionicons name="chevron-down" size={20} color={COLORS.primary} />
                     </TouchableOpacity>
                   </View>
@@ -825,40 +992,37 @@ export default function App() {
                     <View style={styles.exerciseHeader}>
                       <TouchableOpacity 
                         style={styles.exerciseTitleContainer}
-                        onPress={() => toggleExercicioExpandido(item.id)}>
+                        onPress={() => toggleExercicioExpandido(item.id)}
+                        accessibilityRole="button"
+                        accessibilityState={{ expanded: estaExpandido }}
+                        accessibilityLabel={`${item.nome}, ${totalSeries} séries`}>
                         <Ionicons 
                           name={estaExpandido ? "chevron-down" : "chevron-forward"} 
                           size={20} 
                           color={COLORS.primary} 
                         />
-                        <Text style={styles.nomeEx}>{item.nome}</Text>
+                        <Text style={styles.nomeEx} numberOfLines={2}>{item.nome}</Text>
                       </TouchableOpacity>
                       
                       <View style={styles.exerciseActions}>
                         <ActionButton
                           icon="pencil-outline"
                           color={COLORS.primary}
-                          onPress={() => {
-                            setIdExSendoEditado(item.id);
-                            setNomeEx(item.nome);
-                            setSeriesEx(item.series ? item.series.length.toString() : '');
-                            setRepsEx(item.series && item.series[0] ? item.series[0].repeticoes : '');
-                            setTempoEx(item.tempo);
-                            setVelocidadeEx(item.velocidade);
-                            setHorarioEx(item.horario || '');
-                            setCargaEx(item.series && item.series[0] ? item.series[0].carga : '');
-                            setModalExercicioVisible(true);
-                          }}
+                          accessibilityLabel="Editar exercício"
+                          onPress={() => abrirEdicaoExercicio(item)}
                         />
                         <ActionButton
                           icon="trash-outline"
                           color={COLORS.danger}
+                          accessibilityLabel="Excluir exercício"
                           onPress={() => deletarExercicio(item.id)}
                         />
                       </View>
                     </View>
                     
-                    <Text style={styles.detalheEx}>{formatarDetalhesExercicio(item)}</Text>
+                    {formatarDetalhesExercicio(item) !== '' && (
+                      <Text style={styles.detalheEx}>{formatarDetalhesExercicio(item)}</Text>
+                    )}
                     
                     {/* Mostrar resumo mesmo quando fechado */}
                     <View style={styles.exerciseSummary}>
@@ -870,25 +1034,29 @@ export default function App() {
                     {/* Conteúdo expandido */}
                     {estaExpandido && (
                       <View style={styles.seriesContainer}>
-                        {item.series && item.series.map((serie, idx) => (
+                        {item.series.map((serie, idx) => (
                           <View key={serie.id} style={styles.serieItem}>
                             <Text style={styles.serieNumero}>{idx + 1}ª série</Text>
                             
                             <Text style={styles.serieInfo}>
-                              {serie.repeticoes} reps {serie.carga ? ` • ${serie.carga}` : ''}
+                              {serie.repeticoes ? `${serie.repeticoes} reps` : 'reps não definidas'}{serie.carga ? ` • ${serie.carga}` : ''}
                             </Text>
                             
                             <View style={styles.serieActions}>
                               <TouchableOpacity 
                                 style={styles.serieActionBtn}
-                                onPress={() => abrirModalSerie(item, serie)}>
-                                <Ionicons name="create-outline" size={16} color={COLORS.primary} />
+                                onPress={() => abrirModalSerie(item, serie, idx)}
+                                accessibilityRole="button"
+                                accessibilityLabel={`Editar ${idx + 1}ª série`}>
+                                <Ionicons name="create-outline" size={18} color={COLORS.primary} />
                               </TouchableOpacity>
                               
                               <TouchableOpacity 
                                 style={styles.serieActionBtn}
-                                onPress={() => deletarSerie(item, serie.id)}>
-                                <Ionicons name="close-outline" size={16} color={COLORS.danger} />
+                                onPress={() => deletarSerie(item, serie.id)}
+                                accessibilityRole="button"
+                                accessibilityLabel={`Remover ${idx + 1}ª série`}>
+                                <Ionicons name="close-outline" size={18} color={COLORS.danger} />
                               </TouchableOpacity>
                             </View>
                           </View>
@@ -896,7 +1064,8 @@ export default function App() {
                         
                         <TouchableOpacity 
                           style={styles.adicionarSerieBtn}
-                          onPress={() => abrirModalSerie(item)}>
+                          onPress={() => abrirModalSerie(item)}
+                          accessibilityRole="button">
                           <Ionicons name="add-circle-outline" size={20} color={COLORS.primary} />
                           <Text style={styles.adicionarSerieText}>Adicionar Série</Text>
                         </TouchableOpacity>
@@ -911,10 +1080,11 @@ export default function App() {
       </Modal>
 
       {/* MODAIS DE FORMULÁRIO */}
-      <Modal visible={modalCicloVisible} transparent animationType="fade">
+      <Modal visible={modalCicloVisible} transparent animationType="fade" onRequestClose={fecharModalCiclo}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalCentrado}>
           <ScrollView 
             contentContainerStyle={styles.modalScrollContent}
+            keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}>
             <View style={styles.modalView}>
               <Text style={styles.modalTitulo}>{idCicloSendoEditado ? "Editar Ciclo" : "Novo Ciclo"}</Text>
@@ -924,39 +1094,52 @@ export default function App() {
                 placeholderTextColor={COLORS.textSecondary} 
                 value={nomeCiclo} 
                 onChangeText={setNomeCiclo} 
+                maxLength={60}
+                accessibilityLabel="Nome do ciclo"
               />
               <View style={styles.rowInput}>
-                <TouchableOpacity style={styles.btnData} onPress={() => { setDatePickerMode('inicio'); setShowDatePicker(true); }}>
-                  <Text style={styles.btnDataTexto}>Início: {formatarData(dataInicio)}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.btnData} onPress={() => { setDatePickerMode('fim'); setShowDatePicker(true); }}>
-                  <Text style={styles.btnDataTexto}>Fim: {formatarData(dataFim)}</Text>
-                </TouchableOpacity>
+                <CampoData
+                  rotulo="Início"
+                  valor={dataInicio}
+                  onAbrir={() => abrirSeletorData('inicio')}
+                  onSelecionar={(data) => aplicarData('inicio', data)}
+                />
+                <CampoData
+                  rotulo="Fim"
+                  valor={dataFim}
+                  minimo={dataInicio}
+                  onAbrir={() => abrirSeletorData('fim')}
+                  onSelecionar={(data) => aplicarData('fim', data)}
+                />
               </View>
-              
-              <TextInput 
-                style={styles.input} 
-                placeholder="Treinos por semana (ex: 4)" 
-                placeholderTextColor={COLORS.textSecondary} 
-                value={treinosPorSemana} 
-                onChangeText={setTreinosPorSemana} 
-                keyboardType="numeric" 
-              />
-              
-              {showDatePicker && (
+
+              {showDatePicker && Platform.OS !== 'web' && (
                 <DateTimePicker 
                   value={datePickerMode === 'inicio' ? dataInicio : dataFim} 
+                  minimumDate={datePickerMode === 'fim' ? dataInicio : undefined}
                   mode="date" 
                   display="default" 
                   onChange={onDateChange} 
                   themeVariant="dark" 
                 />
               )}
+              
+              <TextInput 
+                style={styles.input} 
+                placeholder="Treinos por semana (1 a 7)" 
+                placeholderTextColor={COLORS.textSecondary} 
+                value={treinosPorSemana} 
+                onChangeText={setTreinosPorSemana} 
+                keyboardType="number-pad" 
+                maxLength={1}
+                accessibilityLabel="Treinos por semana"
+              />
+
               <View style={styles.modalButtonsContainer}>
-                <TouchableOpacity style={styles.modalButtonSalvar} onPress={salvarCiclo}>
+                <TouchableOpacity style={styles.modalButtonSalvar} onPress={salvarCiclo} accessibilityRole="button">
                   <Text style={styles.modalButtonTexto}>Salvar</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.modalButtonCancelar} onPress={fecharModalCiclo}>
+                <TouchableOpacity style={styles.modalButtonCancelar} onPress={fecharModalCiclo} accessibilityRole="button">
                   <Text style={styles.modalButtonTexto}>Cancelar</Text>
                 </TouchableOpacity>
               </View>
@@ -965,10 +1148,11 @@ export default function App() {
         </KeyboardAvoidingView>
       </Modal>
 
-      <Modal visible={modalTreinoVisible} transparent animationType="fade">
+      <Modal visible={modalTreinoVisible} transparent animationType="fade" onRequestClose={fecharModalTreino}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalCentrado}>
           <ScrollView 
             contentContainerStyle={styles.modalScrollContent}
+            keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}>
             <View style={styles.modalView}>
               <Text style={styles.modalTitulo}>{idTreinoSendoEditado ? "Editar Treino" : "Novo Treino"}</Text>
@@ -978,12 +1162,14 @@ export default function App() {
                 placeholderTextColor={COLORS.textSecondary} 
                 value={nomeTreino} 
                 onChangeText={setNomeTreino} 
+                maxLength={60}
+                accessibilityLabel="Nome do treino"
               />
               <View style={styles.modalButtonsContainer}>
-                <TouchableOpacity style={styles.modalButtonSalvar} onPress={salvarTreino}>
+                <TouchableOpacity style={styles.modalButtonSalvar} onPress={salvarTreino} accessibilityRole="button">
                   <Text style={styles.modalButtonTexto}>Salvar</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.modalButtonCancelar} onPress={fecharModalTreino}>
+                <TouchableOpacity style={styles.modalButtonCancelar} onPress={fecharModalTreino} accessibilityRole="button">
                   <Text style={styles.modalButtonTexto}>Cancelar</Text>
                 </TouchableOpacity>
               </View>
@@ -992,10 +1178,11 @@ export default function App() {
         </KeyboardAvoidingView>
       </Modal>
 
-      <Modal visible={modalExercicioVisible} transparent animationType="fade">
+      <Modal visible={modalExercicioVisible} transparent animationType="fade" onRequestClose={fecharModalExercicio}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalCentrado}>
           <ScrollView 
             contentContainerStyle={styles.modalScrollContent}
+            keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}>
             <View style={styles.modalView}>
               <Text style={styles.modalTitulo}>{idExSendoEditado ? "Editar" : "Novo"} Exercício</Text>
@@ -1006,15 +1193,19 @@ export default function App() {
                 placeholderTextColor={COLORS.textSecondary} 
                 value={nomeEx} 
                 onChangeText={setNomeEx} 
+                maxLength={60}
+                accessibilityLabel="Nome do exercício"
               />
               
               <TextInput 
                 style={styles.input} 
-                placeholder="Número de séries (ex: 3)" 
+                placeholder={`Número de séries (0 a ${MAX_SERIES})`} 
                 placeholderTextColor={COLORS.textSecondary} 
                 value={seriesEx} 
                 onChangeText={setSeriesEx} 
-                keyboardType="numeric" 
+                keyboardType="number-pad" 
+                maxLength={2}
+                accessibilityLabel="Número de séries"
               />
               
               <TextInput 
@@ -1023,7 +1214,9 @@ export default function App() {
                 placeholderTextColor={COLORS.textSecondary} 
                 value={repsEx} 
                 onChangeText={setRepsEx} 
-                keyboardType="numeric" 
+                keyboardType="number-pad" 
+                maxLength={3}
+                accessibilityLabel="Repetições padrão"
               />
               
               <TextInput 
@@ -1032,6 +1225,8 @@ export default function App() {
                 placeholderTextColor={COLORS.textSecondary} 
                 value={cargaEx} 
                 onChangeText={setCargaEx} 
+                maxLength={20}
+                accessibilityLabel="Carga padrão"
               />
               
               <TextInput 
@@ -1040,6 +1235,8 @@ export default function App() {
                 placeholderTextColor={COLORS.textSecondary} 
                 value={horarioEx} 
                 onChangeText={setHorarioEx} 
+                maxLength={20}
+                accessibilityLabel="Horário"
               />
               
               <TextInput 
@@ -1048,6 +1245,8 @@ export default function App() {
                 placeholderTextColor={COLORS.textSecondary} 
                 value={tempoEx} 
                 onChangeText={setTempoEx} 
+                maxLength={20}
+                accessibilityLabel="Tempo"
               />
               
               <TextInput 
@@ -1056,13 +1255,15 @@ export default function App() {
                 placeholderTextColor={COLORS.textSecondary} 
                 value={velocidadeEx} 
                 onChangeText={setVelocidadeEx} 
+                maxLength={20}
+                accessibilityLabel="Velocidade"
               />
 
               <View style={styles.modalButtonsContainer}>
-                <TouchableOpacity style={styles.modalButtonSalvar} onPress={salvarExercicio}>
+                <TouchableOpacity style={styles.modalButtonSalvar} onPress={salvarExercicio} accessibilityRole="button">
                   <Text style={styles.modalButtonTexto}>Salvar</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.modalButtonCancelar} onPress={fecharModalExercicio}>
+                <TouchableOpacity style={styles.modalButtonCancelar} onPress={fecharModalExercicio} accessibilityRole="button">
                   <Text style={styles.modalButtonTexto}>Cancelar</Text>
                 </TouchableOpacity>
               </View>
@@ -1071,23 +1272,16 @@ export default function App() {
         </KeyboardAvoidingView>
       </Modal>
 
-      <Modal visible={modalSerieVisible} transparent animationType="fade">
+      <Modal visible={modalSerieVisible} transparent animationType="fade" onRequestClose={fecharModalSerie}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalCentrado}>
           <ScrollView 
             contentContainerStyle={styles.modalScrollContent}
+            keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}>
             <View style={styles.modalView}>
-              <Text style={styles.modalTitulo}>{serieSendoEditada ? "Editar Série" : "Nova Série"}</Text>
-              
-              <TextInput 
-                style={styles.input} 
-                placeholder="Número da série" 
-                placeholderTextColor={COLORS.textSecondary} 
-                value={serieNumero} 
-                onChangeText={setSerieNumero} 
-                keyboardType="numeric" 
-                editable={false}
-              />
+              <Text style={styles.modalTitulo}>
+                {serieSendoEditadaId ? "Editar Série" : "Nova Série"}{serieNumero ? ` • ${serieNumero}ª` : ''}
+              </Text>
               
               <TextInput 
                 style={styles.input} 
@@ -1095,7 +1289,9 @@ export default function App() {
                 placeholderTextColor={COLORS.textSecondary} 
                 value={serieReps} 
                 onChangeText={setSerieReps} 
-                keyboardType="numeric" 
+                keyboardType="number-pad" 
+                maxLength={3}
+                accessibilityLabel="Repetições realizadas"
               />
               
               <TextInput 
@@ -1104,13 +1300,15 @@ export default function App() {
                 placeholderTextColor={COLORS.textSecondary} 
                 value={serieCarga} 
                 onChangeText={setSerieCarga} 
+                maxLength={20}
+                accessibilityLabel="Carga utilizada"
               />
 
               <View style={styles.modalButtonsContainer}>
-                <TouchableOpacity style={styles.modalButtonSalvar} onPress={salvarSerie}>
+                <TouchableOpacity style={styles.modalButtonSalvar} onPress={salvarSerie} accessibilityRole="button">
                   <Text style={styles.modalButtonTexto}>Salvar</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.modalButtonCancelar} onPress={fecharModalSerie}>
+                <TouchableOpacity style={styles.modalButtonCancelar} onPress={fecharModalSerie} accessibilityRole="button">
                   <Text style={styles.modalButtonTexto}>Cancelar</Text>
                 </TouchableOpacity>
               </View>
@@ -1163,7 +1361,7 @@ const styles = StyleSheet.create({
   
   // FlatList content
   flatListContent: {
-    paddingBottom: 30,
+    paddingBottom: 100,
     paddingTop: 10,
   },
   
@@ -1174,11 +1372,15 @@ const styles = StyleSheet.create({
     borderRadius: 20, 
     marginBottom: 15,
     marginHorizontal: 5,
+    borderWidth: 1,
+    borderColor: COLORS.border,
   },
   cardTreinoContainer: { 
     backgroundColor: COLORS.card, 
     padding: 15, 
     borderRadius: 12, 
+    borderWidth: 1,
+    borderColor: COLORS.border,
     marginBottom: 10,
     marginHorizontal: 5,
     flexDirection: 'row',
@@ -1187,19 +1389,22 @@ const styles = StyleSheet.create({
   cardExercicioContainer: {
     backgroundColor: COLORS.card,
     borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
     marginBottom: 15,
     marginHorizontal: 5,
     flexDirection: 'row',
     padding: 12,
   },
-  cardContent: { flex: 1, marginLeft: 10 },
+  cardContent: { flex: 1, marginLeft: 10, justifyContent: 'center' },
   
   // Textos
   tituloCiclo: { fontSize: 18, fontWeight: '700', color: COLORS.text },
   textoData: { color: COLORS.textSecondary, fontSize: 13, marginTop: 2 },
-  nomeEx: { color: COLORS.text, fontSize: 16, fontWeight: 'bold', marginLeft: 8 },
+  nomeEx: { color: COLORS.text, fontSize: 16, fontWeight: 'bold', marginLeft: 8, flexShrink: 1 },
   detalheEx: { color: COLORS.textSecondary, fontSize: 12, marginTop: 2, marginLeft: 28 },
   textoFinalizado: { color: COLORS.textSecondary, fontSize: 12, fontWeight: 'bold', fontStyle: 'italic' },
+  listaVaziaTexto: { color: COLORS.textSecondary, fontSize: 14, textAlign: 'center', marginTop: 20 },
   
   // Layout
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
@@ -1213,7 +1418,7 @@ const styles = StyleSheet.create({
   // Checkbox (apenas para treinos)
   checkbox: { width: 30, height: 30, borderRadius: 15, borderWidth: 2, borderColor: COLORS.textSecondary, justifyContent: 'center', alignItems: 'center' },
   checkboxChecked: { backgroundColor: COLORS.success, borderColor: COLORS.success },
-  statusContainer: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  statusContainer: { flexDirection: 'row', alignItems: 'center', gap: 10, marginLeft: 8 },
   
   // Botões de ação padronizados
   actionButtonsContainer: { flexDirection: 'row', gap: 8 },
@@ -1236,6 +1441,7 @@ const styles = StyleSheet.create({
     alignItems: 'center', 
     gap: 4,
     minWidth: 40,
+    minHeight: 40,
     justifyContent: 'center'
   },
   actionButtonText: { 
@@ -1304,10 +1510,10 @@ const styles = StyleSheet.create({
   },
   serieActions: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 4,
   },
   serieActionBtn: {
-    padding: 4,
+    padding: 8,
   },
   adicionarSerieBtn: {
     flexDirection: 'row',
@@ -1332,7 +1538,7 @@ const styles = StyleSheet.create({
     position: 'absolute', 
     right: 25, 
     bottom: 30,
-    backgroundColor: COLORS.primary, 
+    backgroundColor: COLORS.primaryStrong, 
     width: 60, 
     height: 60, 
     borderRadius: 30, 
@@ -1359,12 +1565,20 @@ const styles = StyleSheet.create({
     marginHorizontal: 5,
   },
   textAdicionar: { color: COLORS.primary, fontWeight: 'bold', fontSize: 16 },
+  btnTentarNovamente: {
+    backgroundColor: COLORS.primaryStrong,
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    marginTop: 20,
+  },
   
   // Botões de reordenar
   reorderContainer: { 
     flexDirection: 'column', 
     marginRight: 10,
     alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: COLORS.input,
     borderRadius: 8,
     padding: 4
@@ -1374,35 +1588,41 @@ const styles = StyleSheet.create({
   // Modais
   modalCentrado: { 
     flex: 1, 
-    backgroundColor: 'rgba(0,0,0,0.7)', 
+    backgroundColor: COLORS.overlay, 
     justifyContent: 'center',
   },
   modalScrollContent: {
     flexGrow: 1,
     justifyContent: 'center',
+    alignItems: 'center',
     paddingVertical: 20,
+    paddingHorizontal: 20,
   },
   modalView: { 
-    margin: 20,
     backgroundColor: COLORS.card, 
     borderRadius: 25, 
+    borderWidth: 1,
+    borderColor: COLORS.border,
     padding: 25, 
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
     shadowRadius: 4,
     elevation: 5,
+    width: '100%',
+    maxWidth: 480,
   },
   modalTitulo: { fontSize: 20, fontWeight: 'bold', marginBottom: 20, textAlign: 'center', color: COLORS.text },
   input: { backgroundColor: COLORS.input, color: COLORS.text, borderRadius: 12, padding: 15, marginBottom: 12, fontSize: 16 },
-  btnData: { backgroundColor: COLORS.input, flex: 1, padding: 15, borderRadius: 12, alignItems: 'center' },
-  btnDataTexto: { color: COLORS.text, fontSize: 14 },
+  btnData: { backgroundColor: COLORS.input, flex: 1, paddingVertical: 12, paddingHorizontal: 10, borderRadius: 12, alignItems: 'center' },
+  rotuloData: { color: COLORS.textSecondary, fontSize: 12, fontWeight: '600' },
+  btnDataTexto: { color: COLORS.text, fontSize: 15, marginTop: 4 },
   
   // Botões do modal
   modalButtonsContainer: { flexDirection: 'row', gap: 10, marginTop: 10 },
-  modalButtonSalvar: { backgroundColor: COLORS.primary, flex: 1, padding: 16, borderRadius: 12, alignItems: 'center' },
-  modalButtonCancelar: { backgroundColor: COLORS.input, flex: 1, padding: 16, borderRadius: 12, alignItems: 'center' },
-  modalButtonTexto: { color: 'white', fontWeight: 'bold', fontSize: 16 },
+  modalButtonSalvar: { backgroundColor: COLORS.primaryStrong, flex: 1, padding: 16, borderRadius: 12, alignItems: 'center' },
+  modalButtonCancelar: { backgroundColor: COLORS.input, flex: 1, padding: 16, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: COLORS.border },
+  modalButtonTexto: { color: COLORS.onPrimary, fontWeight: 'bold', fontSize: 16 },
   
   // Empty state
   emptyContainer: { 
@@ -1410,8 +1630,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center', 
     alignItems: 'center', 
     paddingVertical: 50,
-    marginTop: -50,
   },
-  emptyText: { color: COLORS.textSecondary, fontSize: 18, fontWeight: 'bold', marginTop: 20 },
+  emptyText: { color: COLORS.textSecondary, fontSize: 18, fontWeight: 'bold', marginTop: 20, textAlign: 'center' },
   emptySubText: { color: COLORS.textSecondary, fontSize: 14, marginTop: 10, textAlign: 'center' }
 });
